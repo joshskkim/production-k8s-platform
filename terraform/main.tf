@@ -19,9 +19,9 @@ terraform {
 
   # Configure remote state - replace with your S3 bucket
   backend "s3" {
-    bucket = "your-terraform-state-bucket"
+    bucket = "resume-kubernetes-bucket"
     key    = "production-k8s-platform/terraform.tfstate"
-    region = "us-west-2"
+    region = "us-east-1"
   }
 }
 
@@ -69,7 +69,7 @@ provider "helm" {
 variable "aws_region" {
   description = "AWS region"
   type        = string
-  default     = "us-west-2"
+  default     = "us-east-1"
 }
 
 variable "environment" {
@@ -81,7 +81,7 @@ variable "environment" {
 variable "availability_zones" {
   description = "List of availability zones"
   type        = list(string)
-  default     = ["us-west-2a", "us-west-2b", "us-west-2c"]
+  default     = ["us-east-1a", "us-east-1b", "us-east-1c"]
 }
 
 # VPC Module
