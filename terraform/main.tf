@@ -25,6 +25,25 @@ terraform {
   }
 }
 
+# Variables
+variable "aws_region" {
+  description = "AWS region"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+  default     = "dev"
+}
+
+variable "availability_zones" {
+  description = "List of availability zones"
+  type        = list(string)
+  default     = ["us-east-1a", "us-east-1b", "us-east-1c"]
+}
+
 # Configure AWS Provider
 provider "aws" {
   region = var.aws_region
@@ -65,29 +84,10 @@ provider "helm" {
   }
 }
 
-# Variables
-variable "aws_region" {
-  description = "AWS region"
-  type        = string
-  default     = "us-east-1"
-}
-
-variable "environment" {
-  description = "Environment name"
-  type        = string
-  default     = "dev"
-}
-
-variable "availability_zones" {
-  description = "List of availability zones"
-  type        = list(string)
-  default     = ["us-east-1a", "us-east-1b", "us-east-1c"]
-}
-
 # VPC Module
 module "vpc" {
   source = "./modules/vpc"
-  
+
   environment        = var.environment
   availability_zones = var.availability_zones
 }
