@@ -1,7 +1,7 @@
 # Root Terraform configuration - Orchestrates all infrastructure modules
 terraform {
   required_version = ">= 1.0"
-  
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -47,7 +47,7 @@ variable "availability_zones" {
 # Configure AWS Provider
 provider "aws" {
   region = var.aws_region
-  
+
   default_tags {
     tags = {
       Project     = "production-k8s-platform"
@@ -62,7 +62,7 @@ provider "aws" {
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-  
+
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
@@ -75,7 +75,7 @@ provider "helm" {
   kubernetes {
     host                   = module.eks.cluster_endpoint
     cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-    
+
     exec {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "aws"
@@ -95,34 +95,34 @@ module "vpc" {
 # EKS Module
 module "eks" {
   source = "./modules/eks"
-  
+
   environment        = var.environment
-  vpc_id            = module.vpc.vpc_id
+  vpc_id             = module.vpc.vpc_id
   private_subnet_ids = module.vpc.private_subnet_ids
   public_subnet_ids  = module.vpc.public_subnet_ids
-  
+
   depends_on = [module.vpc]
 }
 
 # RDS Module
 module "rds" {
   source = "./modules/rds"
-  
+
   environment        = var.environment
-  vpc_id            = module.vpc.vpc_id
+  vpc_id             = module.vpc.vpc_id
   private_subnet_ids = module.vpc.private_subnet_ids
-  
+
   depends_on = [module.vpc]
 }
 
 # ElastiCache Module
 module "elasticache" {
   source = "./modules/elasticache"
-  
+
   environment        = var.environment
-  vpc_id            = module.vpc.vpc_id
+  vpc_id             = module.vpc.vpc_id
   private_subnet_ids = module.vpc.private_subnet_ids
-  
+
   depends_on = [module.vpc]
 }
 

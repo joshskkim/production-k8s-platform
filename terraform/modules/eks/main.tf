@@ -18,7 +18,7 @@ resource "aws_iam_role" "eks_cluster" {
   })
 
   tags = {
-    Name = "${var.environment}-eks-cluster-role"
+    Name        = "${var.environment}-eks-cluster-role"
     Environment = var.environment
   }
 }
@@ -53,7 +53,7 @@ resource "aws_security_group" "eks_cluster" {
   }
 
   tags = {
-    Name = "${var.environment}-eks-cluster-sg"
+    Name        = "${var.environment}-eks-cluster-sg"
     Environment = var.environment
   }
 }
@@ -95,7 +95,7 @@ resource "aws_eks_cluster" "main" {
   ]
 
   tags = {
-    Name = "${var.environment}-eks"
+    Name        = "${var.environment}-eks"
     Environment = var.environment
   }
 }
@@ -106,7 +106,7 @@ resource "aws_kms_key" "eks" {
   deletion_window_in_days = 7
 
   tags = {
-    Name = "${var.environment}-eks-encryption-key"
+    Name        = "${var.environment}-eks-encryption-key"
     Environment = var.environment
   }
 }
@@ -117,7 +117,7 @@ resource "aws_cloudwatch_log_group" "eks_cluster" {
   retention_in_days = 30
 
   tags = {
-    Name = "${var.environment}-eks-logs"
+    Name        = "${var.environment}-eks-logs"
     Environment = var.environment
   }
 }
@@ -140,7 +140,7 @@ resource "aws_iam_role" "eks_node_group" {
   })
 
   tags = {
-    Name = "${var.environment}-eks-node-group-role"
+    Name        = "${var.environment}-eks-node-group-role"
     Environment = var.environment
   }
 }
@@ -177,15 +177,15 @@ resource "aws_eks_node_group" "general" {
     min_size     = 1
   }
 
-#   update_config {
-#     max_unavailable = 1
-#   }
+  #   update_config {
+  #     max_unavailable = 1
+  #   }
 
-#   # Launch template for customization
-#   launch_template {
-#     id      = aws_launch_template.eks_node_group.id
-#     version = aws_launch_template.eks_node_group.latest_version
-#   }
+  #   # Launch template for customization
+  #   launch_template {
+  #     id      = aws_launch_template.eks_node_group.id
+  #     version = aws_launch_template.eks_node_group.latest_version
+  #   }
 
   depends_on = [
     aws_iam_role_policy_attachment.eks_worker_node_policy,
@@ -194,15 +194,15 @@ resource "aws_eks_node_group" "general" {
   ]
 
   tags = {
-    Name = "${var.environment}-general-nodes"
+    Name        = "${var.environment}-general-nodes"
     Environment = var.environment
   }
 }
 
 # Launch template for EKS nodes with security hardening
 resource "aws_launch_template" "eks_node_group" {
-  name_prefix   = "${var.environment}-eks-node-"
-  image_id      = data.aws_ami.eks_worker.id
+  name_prefix = "${var.environment}-eks-node-"
+  image_id    = data.aws_ami.eks_worker.id
 
   vpc_security_group_ids = [aws_security_group.eks_nodes.id]
 
@@ -216,15 +216,15 @@ resource "aws_launch_template" "eks_node_group" {
   }
 
   metadata_options {
-    http_endpoint = "enabled"
-    http_tokens   = "required"
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
     http_put_response_hop_limit = 2
   }
 
   tag_specifications {
     resource_type = "instance"
     tags = {
-      Name = "${var.environment}-eks-worker"
+      Name        = "${var.environment}-eks-worker"
       Environment = var.environment
     }
   }
@@ -237,10 +237,10 @@ resource "aws_security_group" "eks_nodes" {
   vpc_id      = var.vpc_id
 
   ingress {
-    from_port = 0
-    to_port   = 65535
-    protocol  = "tcp"
-    self      = true
+    from_port   = 0
+    to_port     = 65535
+    protocol    = "tcp"
+    self        = true
     description = "Node-to-node communication"
   }
 
@@ -251,7 +251,7 @@ resource "aws_security_group" "eks_nodes" {
     security_groups = [aws_security_group.eks_cluster.id]
     description     = "EKS cluster API communication"
   }
-    
+
   ingress {
     from_port       = 1025
     to_port         = 65535
@@ -269,7 +269,7 @@ resource "aws_security_group" "eks_nodes" {
   }
 
   tags = {
-    Name = "${var.environment}-eks-nodes-sg"
+    Name        = "${var.environment}-eks-nodes-sg"
     Environment = var.environment
   }
 }
