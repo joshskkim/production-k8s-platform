@@ -104,27 +104,27 @@ module "eks" {
   depends_on = [module.vpc]
 }
 
-# RDS Module
-module "rds" {
-  source = "./modules/rds"
+# # RDS Module
+# module "rds" {
+#   source = "./modules/rds"
   
-  environment        = var.environment
-  vpc_id            = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
+#   environment        = var.environment
+#   vpc_id            = module.vpc.vpc_id
+#   private_subnet_ids = module.vpc.private_subnet_ids
   
-  depends_on = [module.vpc]
-}
+#   depends_on = [module.vpc]
+# }
 
-# ElastiCache Module
-module "elasticache" {
-  source = "./modules/elasticache"
+# # ElastiCache Module
+# module "elasticache" {
+#   source = "./modules/elasticache"
   
-  environment        = var.environment
-  vpc_id            = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
+#   environment        = var.environment
+#   vpc_id            = module.vpc.vpc_id
+#   private_subnet_ids = module.vpc.private_subnet_ids
   
-  depends_on = [module.vpc]
-}
+#   depends_on = [module.vpc]
+# }
 
 # Outputs
 output "cluster_endpoint" {
@@ -142,13 +142,13 @@ output "vpc_id" {
   value       = module.vpc.vpc_id
 }
 
-output "database_endpoint" {
-  description = "RDS instance endpoint"
-  value       = module.rds.db_endpoint
-  sensitive   = true
-}
+# output "database_endpoint" {
+#   description = "RDS instance endpoint"
+#   value       = module.rds.db_endpoint
+#   sensitive   = true
+# }
 
-output "redis_endpoint" {
-  description = "ElastiCache Redis endpoint"
-  value       = module.elasticache.redis_endpoint
-}
+# output "redis_endpoint" {
+#   description = "ElastiCache Redis endpoint"
+#   value       = module.elasticache.redis_endpoint
+# }
