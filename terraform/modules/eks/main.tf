@@ -177,15 +177,15 @@ resource "aws_eks_node_group" "general" {
     min_size     = 1
   }
 
-  update_config {
-    max_unavailable = 1
-  }
+#   update_config {
+#     max_unavailable = 1
+#   }
 
-  # Launch template for customization
-  launch_template {
-    id      = aws_launch_template.eks_node_group.id
-    version = aws_launch_template.eks_node_group.latest_version
-  }
+#   # Launch template for customization
+#   launch_template {
+#     id      = aws_launch_template.eks_node_group.id
+#     version = aws_launch_template.eks_node_group.latest_version
+#   }
 
   depends_on = [
     aws_iam_role_policy_attachment.eks_worker_node_policy,
@@ -203,7 +203,6 @@ resource "aws_eks_node_group" "general" {
 resource "aws_launch_template" "eks_node_group" {
   name_prefix   = "${var.environment}-eks-node-"
   image_id      = data.aws_ami.eks_worker.id
-  instance_type = "t3.medium"
 
   vpc_security_group_ids = [aws_security_group.eks_nodes.id]
 
@@ -251,6 +250,14 @@ resource "aws_security_group" "eks_nodes" {
     protocol        = "tcp"
     security_groups = [aws_security_group.eks_cluster.id]
     description     = "EKS cluster API communication"
+  }
+    
+  ingress {
+    from_port       = 1025
+    to_port         = 65535
+    protocol        = "tcp"
+    security_groups = [aws_eks_cluster.main.vpc_config[0].cluster_security_group_id]
+    description     = "Cluster to node communication"
   }
 
   egress {
