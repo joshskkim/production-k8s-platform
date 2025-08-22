@@ -11,6 +11,7 @@ resource "aws_db_subnet_group" "main" {
   }
 }
 
+
 # Security Group for RDS
 resource "aws_security_group" "rds" {
   name        = "${var.environment}-rds-sg"
@@ -18,11 +19,11 @@ resource "aws_security_group" "rds" {
   vpc_id      = var.vpc_id
 
   ingress {
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.app.id]
-    description     = "PostgreSQL access from application tier"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = [data.aws_vpc.main.cidr_block]
+    description = "PostgreSQL access from VPC"
   }
 
   egress {
@@ -36,6 +37,11 @@ resource "aws_security_group" "rds" {
     Name        = "${var.environment}-rds-sg"
     Environment = var.environment
   }
+}
+
+# Get VPC info for CIDR block
+data "aws_vpc" "main" {
+  id = var.vpc_id
 }
 
 # Security Group for applications to access RDS
@@ -156,9 +162,4 @@ output "db_endpoint" {
 output "db_port" {
   description = "Database port"
   value       = aws_db_instance.main.port
-}
-
-output "app_security_group_id" {
-  description = "Security group ID for applications"
-  value       = aws_security_group.app.id
 }

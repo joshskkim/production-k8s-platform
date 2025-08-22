@@ -22,7 +22,6 @@ resource "aws_security_group" "elasticache" {
     from_port       = 6379
     to_port         = 6379
     protocol        = "tcp"
-    security_groups = [aws_security_group.cache_client.id]
     description     = "Redis access from application tier"
   }
 
@@ -35,26 +34,6 @@ resource "aws_security_group" "elasticache" {
 
   tags = {
     Name        = "${var.environment}-elasticache-sg"
-    Environment = var.environment
-  }
-}
-
-# Security group for applications to access ElastiCache
-resource "aws_security_group" "cache_client" {
-  name        = "${var.environment}-cache-client-sg"
-  description = "Security group for applications accessing ElastiCache"
-  vpc_id      = var.vpc_id
-
-  egress {
-    from_port       = 6379
-    to_port         = 6379
-    protocol        = "tcp"
-    security_groups = [aws_security_group.elasticache.id]
-    description     = "Access to Redis"
-  }
-
-  tags = {
-    Name        = "${var.environment}-cache-client-sg"
     Environment = var.environment
   }
 }
@@ -168,9 +147,4 @@ output "redis_endpoint" {
 output "redis_port" {
   description = "Redis port"
   value       = aws_elasticache_replication_group.main.port
-}
-
-output "cache_client_security_group_id" {
-  description = "Security group ID for cache clients"
-  value       = aws_security_group.cache_client.id
 }
