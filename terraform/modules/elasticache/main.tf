@@ -19,10 +19,10 @@ resource "aws_security_group" "elasticache" {
   vpc_id      = var.vpc_id
 
   ingress {
-    from_port       = 6379
-    to_port         = 6379
-    protocol        = "tcp"
-    description     = "Redis access from application tier"
+    from_port   = 6379
+    to_port     = 6379
+    protocol    = "tcp"
+    description = "Redis access from application tier"
   }
 
   egress {
