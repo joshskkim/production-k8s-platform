@@ -1,0 +1,122 @@
+# Application CI/CD Pipeline - Build, test, and deploy applications
+name: 'Applications'
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths: [ 'applications/**', 'kubernetes/**' ]
+  pull_request:
+    branches: [ main ]
+    paths: [ 'applications/**', 'kubernetes/**' ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  test:
+    name: 'Test Applications'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    
+    - name: Test Go applications
+      run: |
+        cd applications/api-gateway
+        go mod tidy
+        go test ./...
+        go vet ./...
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Test Python applications
+      run: |
+        cd applications/data-processor
+        pip install -r requirements.txt
+        python -m pytest tests/
+        python -m flake8 src/
+
+  build:
+    name: 'Build and Push Images'
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push'
+    
+    strategy:
+      matrix:
+        app: [api-gateway, user-service, data-processor]
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.app }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./applications/${{ matrix.app }}
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+
+  deploy:
+    name: 'Deploy to Kubernetes'
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-west-2
+    
+    - name: Update kubeconfig
+      run: aws eks update-kubeconfig --region us-west-2 --name prod-eks
+    
+    - name: Deploy to Kubernetes
+      run: |
+        # Update image tags in manifests
+        sed -i "s|image: your-registry|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}|g" kubernetes/apps/*/deployment.yaml
+        sed -i "s|:v1.0.0|:${{ github.sha }}|g" kubernetes/apps/*/deployment.yaml
+        
+        # Apply manifests
+        kubectl apply -f kubernetes/apps/
+        
+        # Wait for rollout
+        kubectl rollout status deployment/api-gateway
+        kubectl rollout status deployment/user-service
+        kubectl rollout status deployment/data-processor
