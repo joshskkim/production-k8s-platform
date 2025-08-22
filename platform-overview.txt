@@ -1,0 +1,29 @@
+NAME                                  READY   STATUS    RESTARTS   AGE
+pod/api-gateway-5c65fc6fb8-bfpxk      1/1     Running   0          3m52s
+pod/api-gateway-5c65fc6fb8-bk5cv      1/1     Running   0          3m47s
+pod/data-processor-64db9c9669-tsjsk   1/1     Running   0          3m35s
+pod/data-processor-64db9c9669-wq7gv   1/1     Running   0          3m50s
+pod/user-service-6544ffb9bf-pb7mf     1/1     Running   0          3m25s
+pod/user-service-6544ffb9bf-wxpgd     1/1     Running   0          3m51s
+
+NAME                     TYPE           CLUSTER-IP       EXTERNAL-IP                                                              PORT(S)        AGE
+service/api-gateway      LoadBalancer   172.20.216.102   ab148ef182b1a4611a70cf3976bfee13-234491676.us-east-1.elb.amazonaws.com   80:31669/TCP   18m
+service/data-processor   ClusterIP      172.20.233.125   <none>                                                                   80/TCP         18m
+service/kubernetes       ClusterIP      172.20.0.1       <none>                                                                   443/TCP        21h
+service/user-service     ClusterIP      172.20.79.158    <none>                                                                   80/TCP         18m
+
+NAME                             READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/api-gateway      2/2     2            2           18m
+deployment.apps/data-processor   2/2     2            2           18m
+deployment.apps/user-service     2/2     2            2           18m
+
+NAME                                        DESIRED   CURRENT   READY   AGE
+replicaset.apps/api-gateway-5bf67ccb97      0         0         0       18m
+replicaset.apps/api-gateway-5c65fc6fb8      2         2         2       3m53s
+replicaset.apps/api-gateway-775c776c98      0         0         0       14m
+replicaset.apps/data-processor-57c59cb684   0         0         0       18m
+replicaset.apps/data-processor-64db9c9669   2         2         2       3m52s
+replicaset.apps/data-processor-9c68d4598    0         0         0       14m
+replicaset.apps/user-service-6544ffb9bf     2         2         2       3m52s
+replicaset.apps/user-service-6645946ffb     0         0         0       14m
+replicaset.apps/user-service-c549bdf59      0         0         0       18m
