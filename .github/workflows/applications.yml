@@ -92,28 +92,50 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Update Kubernetes manifests
         run: |
           # Update image tags in Kubernetes manifests
           for service in payment-service api-gateway; do
             if [ -f "kubernetes/apps/${service}/deployment.yaml" ]; then
+              echo "Updating ${service} deployment manifest..."
               sed -i "s|image: .*/${service}:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${service}:${{ github.sha }}|g" \
                 kubernetes/apps/${service}/deployment.yaml
+              echo "Updated ${service} image to: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${service}:${{ github.sha }}"
+            else
+              echo "Warning: kubernetes/apps/${service}/deployment.yaml not found"
             fi
           done
 
-      - name: Commit updated manifests
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add kubernetes/apps/*/deployment.yaml
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Update container images to ${{ github.sha }}"
-            git push
-          fi
+      - name: Create Pull Request with updated manifests
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "Update container images to ${{ github.sha }}"
+          title: "🚀 Update container images to ${{ github.sha }}"
+          body: |
+            ## 🚀 Automated Container Image Update
+            
+            This PR updates the Kubernetes deployment manifests with the latest container images.
+            
+            ### Changes
+            - **Payment Service**: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/payment-service:${{ github.sha }}`
+            - **API Gateway**: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api-gateway:${{ github.sha }}`
+            
+            ### Built from commit
+            - **SHA**: `${{ github.sha }}`
+            - **Ref**: `${{ github.ref }}`
+            
+            This PR was automatically created by GitHub Actions.
+          branch: update-images-${{ github.sha }}
+          delete-branch: true
+          labels: |
+            automated
+            deployment
+            containers
 
   integration-test:
     needs: build-and-push
