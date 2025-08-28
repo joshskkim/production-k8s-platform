@@ -3,8 +3,12 @@ package com.trading.payments.controller;
 import com.trading.payments.service.PaymentService;
 import com.trading.payments.service.FraudDetectionService;
 import com.trading.payments.service.PaymentEventService;
+import com.trading.payments.service.RiskManagementService;
 import com.trading.payments.dto.*;
 import com.trading.payments.entity.Transaction;
+import com.trading.payments.entity.DailyPosition;
+import com.trading.payments.entity.RiskAlert;
+import com.trading.payments.repository.RiskAlertRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -19,6 +23,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/payments")
@@ -27,7 +32,9 @@ public class PaymentController {
     
     @Autowired private PaymentService paymentService;
     @Autowired private FraudDetectionService fraudService;
-    @Autowired private PaymentEventService eventService;  // Add this
+    @Autowired private PaymentEventService eventService;
+    @Autowired private RiskManagementService riskService;
+    @Autowired private RiskAlertRepository riskAlertRepository;  // Add this
     
     // Health check endpoint
     @GetMapping("/health")
@@ -59,6 +66,21 @@ public class PaymentController {
                         .build());
             }
             
+            // Pre-transaction risk assessment
+            RiskAssessment riskAssessment = riskService.assessTransactionRisk(request);
+            if (!riskAssessment.getApproved()) {
+                return ResponseEntity.ok()
+                    .body(PaymentResponse.builder()
+                        .transactionId(transactionId)
+                        .status("BLOCKED")
+                        .fraudScore(100)
+                        .amount(request.getAmount())
+                        .currency(request.getCurrency())
+                        .message("Risk Management: " + riskAssessment.getReason())
+                        .processedAt(Instant.now())
+                        .build());
+            }
+            
             // Fraud detection check
             FraudResult fraudResult = fraudService.evaluateTransaction(request);
             
@@ -80,6 +102,9 @@ public class PaymentController {
             
             paymentService.saveTransaction(transaction);
             
+            // Update risk positions (post-transaction)
+            riskService.updatePosition(request.getMerchantId(), transaction);
+            
             // Build response
             PaymentResponse response = PaymentResponse.builder()
                 .transactionId(transactionId)
@@ -94,9 +119,11 @@ public class PaymentController {
             log.info("Payment processed: {} status: {} fraud_score: {}", 
                     transactionId, status, fraudResult.getRiskScore());
             
-            // Broadcast real-time events via WebSocket
+            // Broadcast real-time events via STOMP WebSocket
             eventService.broadcastTransactionEvent(response);
-            eventService.sendTransactionFeed(response);
+            if (response.getFraudScore() != null && response.getFraudScore() > 50) {
+                eventService.sendFraudAlert(response);
+            }
             
             return ResponseEntity.ok(response);
             
@@ -138,6 +165,27 @@ public class PaymentController {
         
         MerchantSummary summary = paymentService.getMerchantSummary(merchantId, hours);
         return ResponseEntity.ok(summary);
+    }
+    
+    // NEW: Get merchant risk position
+    @GetMapping("/risk/merchant/{merchantId}/position")
+    public ResponseEntity<DailyPosition> getMerchantPosition(@PathVariable String merchantId) {
+        DailyPosition position = riskService.getCurrentDailyPosition(merchantId);
+        return ResponseEntity.ok(position);
+    }
+    
+    // NEW: Get portfolio risk summary
+    @GetMapping("/risk/portfolio/summary")
+    public ResponseEntity<PositionSummary> getPortfolioSummary() {
+        PositionSummary summary = riskService.getPortfolioSummary();
+        return ResponseEntity.ok(summary);
+    }
+    
+    // NEW: Get active risk alerts
+    @GetMapping("/risk/alerts")
+    public ResponseEntity<List<RiskAlert>> getActiveRiskAlerts() {
+        List<RiskAlert> alerts = riskAlertRepository.findByIsResolvedFalseOrderByCreatedAtDesc();
+        return ResponseEntity.ok(alerts);
     }
     
     private String hashCardNumber(String cardNumber) {

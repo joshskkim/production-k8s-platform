@@ -3,6 +3,9 @@ package com.trading.payments.service;
 import com.trading.payments.dto.PaymentResponse;
 import com.trading.payments.dto.FraudAlert;
 import com.trading.payments.dto.TransactionEvent;
+import com.trading.payments.entity.AlertLevel;
+import com.trading.payments.entity.DailyPosition;
+import com.trading.payments.entity.RiskAlert;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -171,6 +174,70 @@ public class PaymentEventService {
         merchantTransactionCounts.merge(merchantId, 1L, Long::sum);
     }
     
+    /**
+     * Broadcast position updates (like portfolio rebalancing alerts)
+     */
+    public void broadcastPositionUpdate(DailyPosition position) {
+        try {
+            Map<String, Object> positionUpdate = Map.of(
+                "type", "POSITION_UPDATE",
+                "merchantId", position.getMerchantId(),
+                "totalVolume", position.getTotalVolume(),
+                "transactionCount", position.getTransactionCount(),
+                "riskExposure", position.getRiskExposurePercent(),
+                "approvalRate", position.getApprovedCount() > 0 ? 
+                    position.getApprovedVolume().divide(position.getTotalVolume(), 4, java.math.RoundingMode.HALF_UP) : 
+                    java.math.BigDecimal.ZERO,
+                "timestamp", Instant.now()
+            );
+            
+            // Send to risk monitoring dashboard
+            messagingTemplate.convertAndSend("/topic/risk/positions", positionUpdate);
+            
+            // Send to merchant-specific channel
+            messagingTemplate.convertAndSend("/topic/risk/merchant/" + position.getMerchantId(), positionUpdate);
+            
+            log.debug("Position update broadcast: {} - Volume: {}", 
+                position.getMerchantId(), position.getTotalVolume());
+                
+        } catch (Exception e) {
+            log.error("Failed to broadcast position update: ", e);
+        }
+    }
+    
+    /**
+     * Broadcast risk alerts (limit violations, etc.)
+     */
+    public void broadcastRiskAlert(RiskAlert alert) {
+        try {
+            Map<String, Object> riskAlert = Map.of(
+                "type", "RISK_ALERT",
+                "merchantId", alert.getMerchantId(),
+                "alertType", alert.getAlertType().toString(),
+                "alertLevel", alert.getAlertLevel().toString(),
+                "message", alert.getMessage(),
+                "thresholdValue", alert.getThresholdValue() != null ? alert.getThresholdValue() : 0,
+                "currentValue", alert.getCurrentValue() != null ? alert.getCurrentValue() : 0,
+                "transactionId", alert.getTransactionId(),
+                "timestamp", alert.getCreatedAt()
+            );
+            
+            // Send to risk management dashboard
+            messagingTemplate.convertAndSend("/topic/risk/alerts", riskAlert);
+            
+            // Send critical alerts to admin channel
+            if (alert.getAlertLevel() == AlertLevel.CRITICAL || alert.getAlertLevel() == AlertLevel.EMERGENCY) {
+                messagingTemplate.convertAndSend("/topic/admin/critical", riskAlert);
+            }
+            
+            log.warn("Risk alert broadcast: {} - {} - {}", 
+                alert.getMerchantId(), alert.getAlertType(), alert.getMessage());
+                
+        } catch (Exception e) {
+            log.error("Failed to broadcast risk alert: ", e);
+        }
+    }
+
     private void updateFraudStats(String merchantId) {
         fraudAlertCounts.merge(merchantId, 1L, Long::sum);
     }
