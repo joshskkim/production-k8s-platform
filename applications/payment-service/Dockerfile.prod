@@ -1,0 +1,73 @@
+# Production-optimized Dockerfile
+
+# Multi-stage build for optimized production image
+FROM maven:3.9.4-openjdk-17-slim AS builder
+
+LABEL maintainer="Payment Platform Team"
+LABEL description="Production Payment Processing Service"
+
+WORKDIR /build
+
+# Copy dependency files first (for better layer caching)
+COPY pom.xml .
+COPY .mvn/ .mvn/
+
+# Download dependencies (cached layer if pom.xml doesn't change)
+RUN mvn dependency:go-offline -B
+
+# Copy source code
+COPY src ./src
+
+# Build the application with production optimizations
+RUN mvn clean package -DskipTests -Dmaven.javadoc.skip=true \
+    -Dspring.profiles.active=prod \
+    -Dmaven.test.skip=true
+
+# Production runtime image
+FROM openjdk:17-jdk-slim
+
+# Create application user (security best practice)
+RUN groupadd -r paymentapp && useradd -r -g paymentapp paymentapp
+
+# Install required packages
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Set working directory
+WORKDIR /app
+
+# Copy JAR from builder stage
+COPY --from=builder --chown=paymentapp:paymentapp /build/target/payment-service-*.jar app.jar
+
+# Create directories for logs and temp files
+RUN mkdir -p /app/logs /app/tmp && chown -R paymentapp:paymentapp /app
+
+# Switch to non-root user
+USER paymentapp
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/actuator/health || exit 1
+
+# Expose port
+EXPOSE 8080
+
+# Production JVM optimizations
+ENV JAVA_OPTS="-XX:+UseContainerSupport \
+               -XX:MaxRAMPercentage=75.0 \
+               -XX:+UseG1GC \
+               -XX:G1HeapRegionSize=16m \
+               -XX:+UseStringDeduplication \
+               -XX:+OptimizeStringConcat \
+               -Djava.security.egd=file:/dev/./urandom \
+               -Dspring.profiles.active=prod"
+
+# Application configuration
+ENV SERVER_PORT=8080
+ENV MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE="health,info,metrics,prometheus"
+
+# Entry point with proper signal handling
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]
