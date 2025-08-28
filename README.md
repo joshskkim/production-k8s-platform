@@ -4,6 +4,7 @@ A comprehensive Infrastructure-as-Code solution for deploying scalable, secure, 
 
 ![Build Status](https://github.com/joshskkim/production-k8s-platform/workflows/Applications/badge.svg)
 ![Security Scan](https://github.com/joshskkim/production-k8s-platform/workflows/Security/badge.svg)
+![Known Vulnerabilities](https://snyk.io/test/github/joshskkim/production-k8s-platform)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 ## 🏗️ Architecture Overview

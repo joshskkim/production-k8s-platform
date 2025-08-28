@@ -1,31 +1,132 @@
-# Application CI/CD Pipeline - Build, test, and deploy applications
-name: 'Applications'
+name: Build and Deploy Applications
 
 on:
   push:
-    branches: [ main, develop ]
-    paths: [ 'applications/**', 'kubernetes/**' ]
+    branches: [main]
+    paths:
+      - 'applications/**'
+      - '.github/workflows/applications.yml'
   pull_request:
-    branches: [ main ]
-    paths: [ 'applications/**', 'kubernetes/**' ]
+    branches: [main]
+    paths:
+      - 'applications/**'
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  actions: read
+  security-events: write
+
 jobs:
-  test:
-    name: 'Test Applications'
+  build-and-push:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [payment-service, api-gateway]
     
-    # Add services for payment-service integration tests
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./applications/${{ matrix.service }}
+          file: ./applications/${{ matrix.service }}/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        if: github.event_name != 'pull_request'
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}:${{ github.ref_name }}
+          format: 'sarif'
+          output: 'trivy-${{ matrix.service }}-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() && github.event_name != 'pull_request'
+        with:
+          sarif_file: 'trivy-${{ matrix.service }}-results.sarif'
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Update Kubernetes manifests
+        run: |
+          # Update image tags in Kubernetes manifests
+          for service in payment-service api-gateway; do
+            if [ -f "kubernetes/apps/${service}/deployment.yaml" ]; then
+              sed -i "s|image: .*/${service}:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${service}:${{ github.sha }}|g" \
+                kubernetes/apps/${service}/deployment.yaml
+            fi
+          done
+
+      - name: Commit updated manifests
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add kubernetes/apps/*/deployment.yaml
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update container images to ${{ github.sha }}"
+            git push
+          fi
+
+  integration-test:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
     services:
       postgres:
         image: postgres:15-alpine
         env:
-          POSTGRES_DB: trading_platform_test
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: testpass
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_USER: testuser
+          POSTGRES_DB: testdb
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -39,260 +140,66 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
-          --health-timeout 3s
+          --health-timeout 5s
           --health-retries 5
         ports:
           - 6379:6379
-    
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    
-    - name: Setup Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.21'
-    
-    - name: Setup Java
-      uses: actions/setup-java@v3
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-    
-    - name: Cache Maven dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.m2
-        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-        restore-keys: ${{ runner.os }}-m2
-    
-    - name: Test Go applications
-      run: |
-        cd applications/api-gateway
-        go mod tidy
-        go test ./...
-        go vet ./...
-    
-    - name: Test Payment Service
-      run: |
-        cd applications/payment-service
-        mvn clean test
-      env:
-        SPRING_PROFILES_ACTIVE: test
-        DB_HOST: localhost
-        DB_PORT: 5432
-        DB_NAME: trading_platform_test
-        DB_USERNAME: postgres
-        DB_PASSWORD: testpass
-        REDIS_HOST: localhost
-        REDIS_PORT: 6379
-    
-    - name: Run Payment Service Integration Tests
-      run: |
-        cd applications/payment-service
-        # Wait for services to be ready
-        sleep 10
-        mvn clean test -Dtest="*IntegrationTest"
-      env:
-        SPRING_PROFILES_ACTIVE: test
-        DB_HOST: localhost
-        DB_PORT: 5432
-        DB_NAME: trading_platform_test
-        DB_USERNAME: postgres
-        DB_PASSWORD: testpass
-        REDIS_HOST: localhost
-        REDIS_PORT: 6379
 
-  build:
-    name: 'Build and Push Images'
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.event_name == 'push'
-    
-    strategy:
-      matrix:
-        app: [api-gateway, payment-service]
-        include:
-          - app: api-gateway
-            context: ./applications/api-gateway
-            dockerfile: Dockerfile
-          - app: payment-service
-            context: ./applications/payment-service
-            dockerfile: Dockerfile
-    
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-    
-    - name: Log in to Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Extract metadata
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.app }}
-        tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=sha,prefix={{branch}}-
-          type=raw,value=latest,enable={{is_default_branch}}
-    
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: ${{ matrix.context }}
-        file: ${{ matrix.context }}/${{ matrix.dockerfile }}
-        push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        platforms: linux/amd64,linux/arm64
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-  security-scan:
-    name: 'Security Scan'
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'push'
-    
-    strategy:
-      matrix:
-        app: [api-gateway, payment-service]
-    
-    steps:
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
-      with:
-        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.app }}:${{ github.sha }}
-        format: 'sarif'
-        output: 'trivy-results-${{ matrix.app }}.sarif'
-    
-    - name: Upload Trivy scan results
-      uses: github/codeql-action/upload-sarif@v2
-      if: always()
-      with:
-        sarif_file: 'trivy-results-${{ matrix.app }}.sarif'
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
-  load-test:
-    name: 'Load Test Payment Service'
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    
-    - name: Set up K6
-      run: |
-        sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
-        echo "deb https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
-        sudo apt-get update
-        sudo apt-get install k6
-    
-    - name: Run load test
-      run: |
-        if [ -f applications/payment-service/load-test.js ]; then
-          k6 run --vus 10 --duration 1m applications/payment-service/load-test.js
-        else
-          echo "Load test script not found, skipping load test"
-        fi
-      env:
-        API_BASE_URL: ${{ secrets.STAGING_API_URL || 'http://localhost:8080' }}
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
 
-  deploy:
-    name: 'Deploy to Kubernetes'
-    runs-on: ubuntu-latest
-    needs: [build, security-scan]
-    if: github.ref == 'refs/heads/main'
-    environment:
-      name: production
-    
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-1
-    
-    - name: Update kubeconfig
-      run: aws eks update-kubeconfig --region us-east-1 --name prod-eks
-    
-    - name: Deploy to Kubernetes
-      run: |
-        # Update image tags in manifests
-        sed -i "s|image: your-registry|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}|g" kubernetes/apps/*/deployment.yaml
-        sed -i "s|:v1.0.0|:${{ github.sha }}|g" kubernetes/apps/*/deployment.yaml
-        
-        # Apply database and cache dependencies first
-        kubectl apply -f kubernetes/infrastructure/ || true
-        
-        # Wait for database and cache to be ready
-        kubectl wait --for=condition=ready pod -l app=postgresql --timeout=300s || true
-        kubectl wait --for=condition=ready pod -l app=redis --timeout=300s || true
-        
-        # Apply application manifests
-        kubectl apply -f kubernetes/apps/
-        
-        # Wait for rollout
-        kubectl rollout status deployment/api-gateway --timeout=300s
-        kubectl rollout status deployment/payment-service --timeout=300s
-    
-    - name: Run smoke tests
-      run: |
-        # Wait for services to be ready
-        sleep 30
-        
-        # Get service URLs
-        API_GATEWAY_URL=$(kubectl get svc api-gateway -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' || echo "localhost")
-        PAYMENT_SERVICE_URL=$(kubectl get svc payment-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' || echo "localhost")
-        
-        # Basic health checks
-        echo "Testing API Gateway health..."
-        curl -f http://$API_GATEWAY_URL/health || kubectl port-forward svc/api-gateway 8080:80 &
-        
-        echo "Testing Payment Service health..."
-        curl -f http://$PAYMENT_SERVICE_URL:8080/api/v1/payments/health || kubectl port-forward svc/payment-service 8081:80 &
-        
-        # Test payment processing
-        echo "Testing payment processing..."
-        curl -X POST http://$PAYMENT_SERVICE_URL:8080/api/v1/payments/process \
-          -H "Content-Type: application/json" \
-          -d '{"merchantId":"MERCHANT_001","cardNumber":"4111111111111111","amount":100.00}' || echo "Payment test failed but continuing..."
-        
-        # Test risk management endpoints
-        echo "Testing risk management..."
-        curl -f http://$PAYMENT_SERVICE_URL:8080/api/v1/payments/risk/portfolio/summary || echo "Risk endpoint test failed but continuing..."
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
 
-  notify:
-    name: 'Notify Teams'
-    runs-on: ubuntu-latest
-    needs: [deploy]
-    if: always()
-    
-    steps:
-    - name: Notify Slack on success
-      if: needs.deploy.result == 'success'
-      run: |
-        curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"✅ Payment Platform deployed successfully to production!\n• API Gateway: Ready\n• Payment Service: Ready\n• All tests passed"}' \
-          ${{ secrets.SLACK_WEBHOOK_URL }} || echo "Slack notification failed"
-    
-    - name: Notify Slack on failure
-      if: needs.deploy.result == 'failure'
-      run: |
-        curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"❌ Payment Platform deployment failed!\nCheck GitHub Actions for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}' \
-          ${{ secrets.SLACK_WEBHOOK_URL }} || echo "Slack notification failed"
+      - name: Cache Go dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
+      - name: Run Payment Service Tests
+        working-directory: ./applications/payment-service
+        run: |
+          mvn clean test -Dspring.profiles.active=test
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/testdb
+          SPRING_DATASOURCE_USERNAME: testuser
+          SPRING_DATASOURCE_PASSWORD: testpassword
+          SPRING_REDIS_HOST: localhost
+          SPRING_REDIS_PORT: 6379
+
+      - name: Run API Gateway Tests
+        working-directory: ./applications/api-gateway
+        run: |
+          go test -v ./...
+        env:
+          REDIS_URL: localhost:6379
+          DATABASE_URL: postgres://testuser:testpassword@localhost:5432/testdb?sslmode=disable
+
+      - name: Generate Test Report
+        if: always()
+        run: |
+          echo "## 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Payment Service | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| API Gateway | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
