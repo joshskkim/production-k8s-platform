@@ -8,7 +8,7 @@ import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.scheduling.annotation.EnableAsync;
 
 @SpringBootApplication
-@EnableJpaRepositories
+@EnableJpaRepositories(basePackages = "com.trading.payments.repository") // Explicitly specify JPA repos
 @EnableJpaAuditing
 @EnableCaching
 @EnableAsync

@@ -2,6 +2,7 @@ package com.trading.payments.controller;
 
 import com.trading.payments.service.PaymentService;
 import com.trading.payments.service.FraudDetectionService;
+import com.trading.payments.service.PaymentEventService;
 import com.trading.payments.dto.*;
 import com.trading.payments.entity.Transaction;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,7 @@ public class PaymentController {
     
     @Autowired private PaymentService paymentService;
     @Autowired private FraudDetectionService fraudService;
+    @Autowired private PaymentEventService eventService;  // Add this
     
     // Health check endpoint
     @GetMapping("/health")
@@ -91,7 +93,11 @@ public class PaymentController {
                 
             log.info("Payment processed: {} status: {} fraud_score: {}", 
                     transactionId, status, fraudResult.getRiskScore());
-                    
+            
+            // Broadcast real-time events via WebSocket
+            eventService.broadcastTransactionEvent(response);
+            eventService.sendTransactionFeed(response);
+            
             return ResponseEntity.ok(response);
             
         } catch (Exception e) {

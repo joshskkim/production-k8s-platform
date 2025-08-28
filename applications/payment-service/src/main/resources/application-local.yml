@@ -6,6 +6,10 @@ server:
 spring:
   application:
     name: payment-service
+  
+  # Exclude Redis repositories from auto-configuration  
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
     
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:trading_platform}

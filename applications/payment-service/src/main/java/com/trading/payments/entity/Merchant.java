@@ -20,7 +20,7 @@ public class Merchant {
     
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    private Integer id;  // Changed from Long to Integer to match SERIAL
     
     @Column(name = "merchant_id", unique = true, nullable = false)
     private String merchantId;
