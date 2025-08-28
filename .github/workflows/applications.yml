@@ -17,11 +17,12 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 permissions:
-  contents: read
+  contents: write
   packages: write
   id-token: write
   actions: read
   security-events: write
+  pull-requests: write
 
 jobs:
   build-and-push:
@@ -111,10 +112,11 @@ jobs:
           done
 
       - name: Create Pull Request with updated manifests
-        uses: peter-evans/create-pull-request@v5
+        id: cpr
+        uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "Update container images to ${{ github.sha }}"
+          commit-message: "chore: update container images to ${{ github.sha }}"
           title: "🚀 Update container images to ${{ github.sha }}"
           body: |
             ## 🚀 Automated Container Image Update
@@ -128,14 +130,41 @@ jobs:
             ### Built from commit
             - **SHA**: `${{ github.sha }}`
             - **Ref**: `${{ github.ref }}`
+            - **Workflow Run**: [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
             
             This PR was automatically created by GitHub Actions.
+            
+            ---
+            
+            <details>
+            <summary>🔍 View Deployment Details</summary>
+            
+            | Service | Image | Status |
+            |---------|-------|--------|
+            | Payment Service | `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/payment-service:${{ github.sha }}` | ✅ Built |
+            | API Gateway | `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api-gateway:${{ github.sha }}` | ✅ Built |
+            
+            </details>
           branch: update-images-${{ github.sha }}
           delete-branch: true
           labels: |
             automated
             deployment
             containers
+          assignees: ${{ github.actor }}
+          
+      - name: Check PR result
+        if: steps.cpr.outputs.pull-request-operation == 'created'
+        run: |
+          echo "## 🚀 Deployment Update" >> $GITHUB_STEP_SUMMARY
+          echo "Created PR #${{ steps.cpr.outputs.pull-request-number }}: ${{ steps.cpr.outputs.pull-request-url }}" >> $GITHUB_STEP_SUMMARY
+          echo "The Kubernetes manifests have been updated with the latest container images." >> $GITHUB_STEP_SUMMARY
+          
+      - name: Comment if no changes
+        if: steps.cpr.outputs.pull-request-operation == ''
+        run: |
+          echo "## ℹ️ No Changes" >> $GITHUB_STEP_SUMMARY
+          echo "No updates were needed for the Kubernetes manifests." >> $GITHUB_STEP_SUMMARY
 
   integration-test:
     needs: build-and-push

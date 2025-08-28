@@ -3,7 +3,6 @@
 A comprehensive Infrastructure-as-Code solution for deploying scalable, secure, and observable payment processing platforms on AWS. This project demonstrates enterprise-grade practices for container orchestration, real-time fraud detection, risk management, and financial services infrastructure.
 
 [![Build Applications](https://github.com/joshskkim/production-k8s-platform/actions/workflows/applications.yml/badge.svg)](https://github.com/joshskkim/production-k8s-platform/actions/workflows/applications.yml)
-[![Security Scan](https://github.com/joshskkim/production-k8s-platform/actions/workflows/security-scan.yml/badge.svg)](https://github.com/joshskkim/production-k8s-platform/actions/workflows/security-scan.yml)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 ## 🏗️ Architecture Overview
