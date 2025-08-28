@@ -34,18 +34,6 @@ jobs:
         go test ./...
         go vet ./...
     
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    
-    - name: Test Python applications
-      run: |
-        cd applications/data-processor
-        pip install -r requirements.txt
-        python -m pytest tests/
-        python -m flake8 src/
-
   build:
     name: 'Build and Push Images'
     runs-on: ubuntu-latest
@@ -54,7 +42,7 @@ jobs:
     
     strategy:
       matrix:
-        app: [api-gateway, payment-service, data-processor]
+        app: [api-gateway, payment-service]
     
     steps:
     - name: Checkout
@@ -119,5 +107,4 @@ jobs:
         
         # Wait for rollout
         kubectl rollout status deployment/api-gateway
-        kubectl rollout status deployment/user-service
-        kubectl rollout status deployment/data-processor
+        kubectl rollout status deployment/payment-service
