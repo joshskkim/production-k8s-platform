@@ -1,7 +1,7 @@
 # Payment Service Dockerfile
 # Save as: apps/payment-service/Dockerfile
 
-FROM openjdk:17-jdk-slim as builder
+FROM openjdk:17-jdk-slim AS builder
 
 WORKDIR /app
 COPY pom.xml .
