@@ -128,7 +128,7 @@ public class PaymentProcessingIntegrationTest {
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value("DECLINED"))
-                .andExpect(jsonPath("$.message").value("Invalid amount"));
+                .andExpect(jsonPath("$.message").value("must be greater than or equal to 0.01"));
     }
 
     @Test

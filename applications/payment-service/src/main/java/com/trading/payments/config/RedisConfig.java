@@ -1,5 +1,3 @@
-// Save as: apps/payment-service/src/main/java/com/trading/payments/config/RedisConfig.java
-
 package com.trading.payments.config;
 
 import org.springframework.context.annotation.Bean;
