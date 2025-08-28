@@ -1,3 +1,16 @@
+package com.trading.payments.entity;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
 @Entity
 @Table(name = "transactions")
 @Data
@@ -47,24 +60,4 @@ public class Transaction {
     @Column(name = "updated_at")
     @UpdateTimestamp
     private LocalDateTime updatedAt;
-}
-
-@Repository
-public interface TransactionRepository extends JpaRepository<Transaction, Long> {
-    
-    Optional<Transaction> findByTransactionId(String transactionId);
-    
-    List<Transaction> findByMerchantIdAndCreatedAtAfter(String merchantId, LocalDateTime since);
-    
-    @Query("SELECT COUNT(t) FROM Transaction t WHERE t.merchantId = :merchantId AND t.createdAt > :since")
-    Long countTransactionsByMerchantSince(@Param("merchantId") String merchantId, @Param("since") LocalDateTime since);
-    
-    @Query("SELECT SUM(t.amount) FROM Transaction t WHERE t.merchantId = :merchantId AND t.status = 'approved' AND t.createdAt > :since")
-    BigDecimal sumApprovedAmountByMerchantSince(@Param("merchantId") String merchantId, @Param("since") LocalDateTime since);
-    
-    @Query("SELECT COUNT(t) FROM Transaction t WHERE t.cardNumberHash = :cardHash AND t.createdAt > :since")
-    Long countTransactionsByCardSince(@Param("cardHash") String cardHash, @Param("since") LocalDateTime since);
-    
-    @Query("SELECT AVG(t.fraudScore) FROM Transaction t WHERE t.merchantId = :merchantId AND t.createdAt > :since")
-    Double averageFraudScoreByMerchantSince(@Param("merchantId") String merchantId, @Param("since") LocalDateTime since);
 }

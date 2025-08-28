@@ -1,3 +1,15 @@
+package com.trading.payments.entity;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.time.LocalDateTime;
+
 @Entity
 @Table(name = "merchants")
 @Data
@@ -29,9 +41,4 @@ public class Merchant {
     @Column(name = "updated_at")
     @UpdateTimestamp
     private LocalDateTime updatedAt;
-}
-
-@Repository
-public interface MerchantRepository extends JpaRepository<Merchant, Long> {
-    Optional<Merchant> findByMerchantId(String merchantId);
 }

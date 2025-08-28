@@ -1,3 +1,15 @@
+package com.trading.payments.entity;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.hibernate.annotations.CreationTimestamp;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
 @Entity
 @Table(name = "fraud_rules")
 @Data
@@ -31,10 +43,4 @@ public class FraudRule {
     @Column(name = "created_at")
     @CreationTimestamp
     private LocalDateTime createdAt;
-}
-
-@Repository
-public interface FraudRuleRepository extends JpaRepository<FraudRule, Long> {
-    List<FraudRule> findByIsActiveTrue();
-    List<FraudRule> findByRuleTypeAndIsActiveTrue(String ruleType);
 }
