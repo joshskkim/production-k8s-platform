@@ -1,4 +1,21 @@
 # Root module variables
+variable "create_rds" {
+  description = "Create RDS instance"
+  type        = bool
+  default     = true
+}
+
+variable "create_elasticache" {
+  description = "Create ElastiCache cluster"
+  type        = bool
+  default     = true
+}
+
+variable "create_alb" {
+  description = "Create Application Load Balancer"
+  type        = bool
+  default     = true
+}
 
 # General Configuration
 variable "environment" {
@@ -125,6 +142,18 @@ variable "enable_aws_load_balancer_controller" {
   description = "Enable AWS Load Balancer Controller"
   type        = bool
   default     = true
+}
+
+variable "endpoint_private_access" {
+  description = "Enable private API server endpoint"
+  type        = bool
+  default     = true
+}
+
+variable "endpoint_public_access" {
+  description = "Enable public API server endpoint" 
+  type        = bool
+  default     = false
 }
 
 # RDS Configuration

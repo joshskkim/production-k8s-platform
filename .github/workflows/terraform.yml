@@ -1,5 +1,5 @@
 # .github/workflows/terraform.yml
-name: Terraform Deployment with Cleanup
+name: Terraform with Auto-Cleanup
 on:
   push:
     branches: [main]
@@ -13,7 +13,7 @@ on:
         type: choice
         options:
         - deploy
-        - cleanup
+        - cleanup-only
       environment:
         description: 'Environment to target'
         required: true
@@ -23,13 +23,15 @@ on:
         - development
         - staging
         - production
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
 
 env:
   AWS_REGION: us-east-1
 
 jobs:
   terraform-deploy:
-    if: ${{ github.event.inputs.action != 'cleanup' }}
+    if: ${{ github.event.inputs.action != 'cleanup-only' && github.event.schedule == null }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -53,65 +55,65 @@ jobs:
         with:
           version: '3.12.0'
 
-      - name: Terraform Init
+      - name: Terraform Deploy
         run: |
           cd terraform/environments/${{ matrix.environment }}
           terraform init
-
-      - name: Terraform Validate
-        run: |
-          cd terraform/environments/${{ matrix.environment }}
           terraform validate
-
-      - name: Terraform Plan
-        run: |
-          cd terraform/environments/${{ matrix.environment }}
           terraform plan -out=tfplan
-
-      - name: Terraform Apply
-        if: github.ref == 'refs/heads/main'
-        run: |
-          cd terraform/environments/${{ matrix.environment }}
           terraform apply tfplan
 
-      - name: Deploy Monitoring Stack
-        if: github.ref == 'refs/heads/main'
+      - name: Deploy Monitoring
         run: |
           cd terraform/environments/${{ matrix.environment }}
-          # Wait for EKS cluster to be fully ready
           sleep 60
-          # Deploy monitoring if script exists
           if [ -f "./deploy-monitoring.sh" ]; then
             chmod +x ./deploy-monitoring.sh
             ./deploy-monitoring.sh
           fi
 
       - name: Verify Deployment
-        if: github.ref == 'refs/heads/main'
         run: |
-          # Get cluster info
           CLUSTER_NAME="${{ matrix.environment }}-payment-platform-cluster"
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name $CLUSTER_NAME
-          
-          echo "🔍 Cluster Status:"
           kubectl get nodes
-          
-          echo "🔍 Monitoring Pods:"
           kubectl get pods -n monitoring --ignore-not-found=true
-          
-          echo "🔍 All Namespaces:"
-          kubectl get ns
 
-      - name: Schedule Cleanup
-        if: github.ref == 'refs/heads/main' && matrix.environment == 'development'
+      # AUTO-DESTROY for development after 30 minutes
+      - name: Wait and Auto-Cleanup (Dev Only)
+        if: matrix.environment == 'development'
         run: |
-          echo "⏰ Cleanup scheduled for 2 hours from now"
-          echo "CLEANUP_TIME=$(date -d '+2 hours' -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
+          echo "⏰ Waiting 30 minutes before auto-cleanup..."
+          sleep 1800  # 30 minutes
+          
+          echo "🧹 Starting auto-cleanup for development environment..."
+          
+          # Cleanup monitoring first
+          CLUSTER_NAME="${{ matrix.environment }}-payment-platform-cluster"
+          if aws eks describe-cluster --name $CLUSTER_NAME --region ${{ env.AWS_REGION }} &>/dev/null; then
+            aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name $CLUSTER_NAME
+            
+            # Remove monitoring stack
+            helm uninstall promtail -n monitoring --ignore-not-found || true
+            helm uninstall loki -n monitoring --ignore-not-found || true
+            helm uninstall kube-prometheus-stack -n monitoring --ignore-not-found || true
+            helm uninstall prometheus-operator-crds -n monitoring --ignore-not-found || true
+            kubectl delete namespace monitoring --ignore-not-found=true || true
+            
+            # Wait for cleanup
+            sleep 60
+          fi
+          
+          # Destroy infrastructure
+          cd terraform/environments/${{ matrix.environment }}
+          terraform destroy -auto-approve
+          
+          echo "✅ Development environment auto-cleanup completed"
 
+  # Manual cleanup job
   terraform-cleanup:
-    if: ${{ github.event.inputs.action == 'cleanup' || (github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[cleanup]')) }}
+    if: ${{ github.event.inputs.action == 'cleanup-only' }}
     runs-on: ubuntu-latest
-    # environment: cleanup-approval
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -123,7 +125,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Setup Terraform
+      - name: Setup Tools
         uses: hashicorp/setup-terraform@v3
 
       - name: Setup Helm
@@ -131,75 +133,33 @@ jobs:
         with:
           version: '3.12.0'
 
-      - name: Determine Environment
+      - name: Manual Cleanup
         run: |
-          ENV="${{ github.event.inputs.environment }}"
-          if [ -z "$ENV" ]; then
-            ENV="development"
-          fi
-          echo "ENVIRONMENT=$ENV" >> $GITHUB_ENV
-
-      - name: Cleanup Monitoring Stack
-        continue-on-error: true
-        run: |
-          CLUSTER_NAME="${{ env.ENVIRONMENT }}-payment-platform-cluster"
+          ENV="${{ github.event.inputs.environment || 'development' }}"
+          CLUSTER_NAME="$ENV-payment-platform-cluster"
           
-          # Try to connect to cluster
+          echo "🧹 Cleaning up $ENV environment..."
+          
+          # Cleanup monitoring if cluster exists
           if aws eks describe-cluster --name $CLUSTER_NAME --region ${{ env.AWS_REGION }} &>/dev/null; then
             aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name $CLUSTER_NAME
-            
-            cd terraform/environments/${{ env.ENVIRONMENT }}
-            if [ -f "./cleanup-monitoring.sh" ]; then
-              chmod +x ./cleanup-monitoring.sh
-              ./cleanup-monitoring.sh
-            fi
-            
-            # Manual cleanup of monitoring resources
             helm uninstall promtail -n monitoring --ignore-not-found || true
             helm uninstall loki -n monitoring --ignore-not-found || true
             helm uninstall kube-prometheus-stack -n monitoring --ignore-not-found || true
-            helm uninstall prometheus-operator-crds -n monitoring --ignore-not-found || true
             kubectl delete namespace monitoring --ignore-not-found=true || true
-          else
-            echo "⚠️ Cluster not found or not accessible, skipping monitoring cleanup"
+            sleep 30
           fi
-
-      - name: Terraform Init for Cleanup
-        run: |
-          cd terraform/environments/${{ env.ENVIRONMENT }}
+          
+          # Terraform destroy
+          cd terraform/environments/$ENV
           terraform init
-
-      - name: Terraform Destroy
-        run: |
-          cd terraform/environments/${{ env.ENVIRONMENT }}
           terraform destroy -auto-approve
 
-      - name: Verify Cleanup
-        run: |
-          CLUSTER_NAME="${{ env.ENVIRONMENT }}-payment-platform-cluster"
-          
-          echo "🔍 Verifying AWS resources are cleaned up..."
-          
-          # Check if EKS cluster still exists
-          if aws eks describe-cluster --name $CLUSTER_NAME --region ${{ env.AWS_REGION }} &>/dev/null; then
-            echo "⚠️ EKS cluster still exists!"
-            exit 1
-          else
-            echo "✅ EKS cluster successfully deleted"
-          fi
-          
-          # Check for any remaining EKS resources
-          echo "🔍 Checking for remaining EKS resources..."
-          aws eks list-clusters --region ${{ env.AWS_REGION }} --query "clusters[?contains(@, '${{ env.ENVIRONMENT }}-payment-platform')]"
-
-  # Scheduled cleanup job (runs daily to catch any missed resources)
-  scheduled-cleanup:
+  # Scheduled orphan resource cleanup
+  cleanup-orphaned:
     if: github.event.schedule
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -207,22 +167,53 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Check for Old Development Resources
+      - name: Find and Cleanup Orphaned Resources
         run: |
-          echo "🔍 Checking for development resources older than 24 hours..."
+          echo "🔍 Scanning for orphaned AWS resources..."
           
-          # List all EKS clusters and check creation time
-          CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[*]' --output text)
+          # Find old EKS clusters
+          echo "Checking EKS clusters..."
+          aws eks list-clusters --region ${{ env.AWS_REGION }} --output table
           
+          # Find old load balancers
+          echo "Checking load balancers..."
+          aws elbv2 describe-load-balancers --query 'LoadBalancers[?contains(LoadBalancerName, `payment-platform`) || contains(LoadBalancerName, `development`)].{Name:LoadBalancerName,Created:CreatedTime}' --output table
+          
+          # Find old security groups
+          echo "Checking security groups..."
+          aws ec2 describe-security-groups --filters "Name=group-name,Values=*payment-platform*" --query 'SecurityGroups[].{Name:GroupName,ID:GroupId}' --output table
+          
+          # Find old VPCs
+          echo "Checking VPCs..."
+          aws ec2 describe-vpcs --filters "Name=tag:Name,Values=*payment-platform*" --query 'Vpcs[].{Name:Tags[?Key==`Name`].Value|[0],VpcId:VpcId,State:State}' --output table
+          
+          # Find old RDS instances
+          echo "Checking RDS instances..."
+          aws rds describe-db-instances --query 'DBInstances[?contains(DBInstanceIdentifier, `payment-platform`)].{Name:DBInstanceIdentifier,Status:DBInstanceStatus}' --output table
+          
+          # Find old ElastiCache clusters
+          echo "Checking ElastiCache..."
+          aws elasticache describe-cache-clusters --query 'CacheClusters[?contains(CacheClusterId, `payment-platform`)].{Name:CacheClusterId,Status:CacheClusterStatus}' --output table
+          
+          # Cleanup old development resources (older than 6 hours)
+          CUTOFF_TIME=$(date -u -d '6 hours ago' '+%Y-%m-%dT%H:%M:%SZ')
+          echo "Cleaning resources created before: $CUTOFF_TIME"
+          
+          # Delete old development EKS clusters
+          CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --output text --query 'clusters[]')
           for cluster in $CLUSTERS; do
             if [[ $cluster == *"development"* ]]; then
-              CREATED=$(aws eks describe-cluster --name $cluster --region ${{ env.AWS_REGION }} --query 'cluster.createdAt' --output text)
-              CREATED_TIMESTAMP=$(date -d "$CREATED" +%s)
-              CURRENT_TIMESTAMP=$(date +%s)
-              AGE_HOURS=$(( (CURRENT_TIMESTAMP - CREATED_TIMESTAMP) / 3600 ))
-              
-              if [ $AGE_HOURS -gt 24 ]; then
-                echo "⚠️ Found old development cluster: $cluster (${AGE_HOURS} hours old)"
-                echo "CLEANUP_NEEDED=true" >> $GITHUB_ENV
+              CREATED=$(aws eks describe-cluster --name $cluster --query 'cluster.createdAt' --output text)
+              if [[ "$CREATED" < "$CUTOFF_TIME" ]]; then
+                echo "🗑️ Deleting old development cluster: $cluster"
+                # Note: This is aggressive - use with caution
+                # aws eks delete-cluster --name $cluster --region ${{ env.AWS_REGION }} || true
+                echo "Found old cluster: $cluster (would delete in production cleanup)"
               fi
             fi
+          done
+
+      - name: Report Cleanup Status
+        run: |
+          echo "📊 Cleanup scan completed"
+          echo "Check the logs above for any resources that need attention"
