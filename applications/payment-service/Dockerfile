@@ -1,7 +1,7 @@
 # Payment Service Dockerfile
 # Save as: apps/payment-service/Dockerfile
 
-FROM openjdk:17-jdk-slim AS builder
+FROM openjdk:17-jdk-slim-bookworm AS builder
 
 WORKDIR /app
 COPY pom.xml .
@@ -14,7 +14,7 @@ RUN mvn dependency:go-offline -B
 # Build the application
 RUN mvn clean package -DskipTests
 
-FROM openjdk:17-jdk-slim
+FROM openjdk:17-jdk-slim-bookworm 
 
 WORKDIR /app
 
@@ -22,7 +22,10 @@ WORKDIR /app
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 # Install curl for health checks
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y curl && \
+    rm -rf /var/lib/apt/lists/* 
 
 # Copy the jar file
 COPY --from=builder /app/target/payment-service-*.jar app.jar
