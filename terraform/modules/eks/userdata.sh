@@ -1,11 +1,14 @@
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="==MYBOUNDARY=="
+
+--==MYBOUNDARY==
+Content-Type: text/x-shellscript; charset="us-ascii"
+
 #!/bin/bash
 # EKS Node User Data Script
 
 # Bootstrap the node with EKS cluster
-/etc/eks/bootstrap.sh ${cluster_name} ${bootstrap_arguments} \
-  --container-runtime ${container_runtime} \
-  --apiserver-endpoint ${cluster_endpoint} \
-  --b64-cluster-ca ${cluster_ca}
+/etc/eks/bootstrap.sh ${cluster_name} ${bootstrap_arguments}
 
 # Install additional packages if needed
 yum update -y
@@ -15,3 +18,5 @@ systemctl start amazon-ssm-agent
 
 # Set up logging
 echo "EKS node bootstrap completed for cluster: ${cluster_name}" >> /var/log/eks-bootstrap.log
+
+--==MYBOUNDARY==--
