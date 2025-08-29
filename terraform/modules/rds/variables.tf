@@ -169,11 +169,11 @@ variable "multi_az" {
   default     = true
 }
 
-variable "create_read_replica" {
-  description = "Create a read replica"
-  type        = bool
-  default     = true
-}
+# variable "create_read_replica" {
+#   description = "Create a read replica"
+#   type        = bool
+#   default     = true
+# }
 
 variable "replica_instance_class" {
   description = "Instance class for read replica (defaults to main instance class)"

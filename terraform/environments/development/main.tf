@@ -63,7 +63,7 @@ module "payment_platform" {
   rds_backup_window                = "03:00-04:00"
   rds_maintenance_window           = "sun:04:00-sun:05:00"
   rds_multi_az                     = false
-  rds_create_read_replica          = false
+  # rds_create_read_replica          = false
   rds_monitoring_interval          = 0
   rds_performance_insights_enabled = false
 
