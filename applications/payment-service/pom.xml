@@ -8,7 +8,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.1.5</version>
+        <version>3.2.1</version>
         <relativePath/>
     </parent>
     
@@ -27,9 +27,9 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         
         <!-- Dependency versions -->
-        <spring-boot.version>3.1.5</spring-boot.version>
+        <spring-boot.version>3.2.1</spring-boot.version>
         <testcontainers.version>1.19.3</testcontainers.version>
-        <lombok.version>1.18.30</lombok.version>
+        <lombok.version>1.18.32</lombok.version>
         <commons-codec.version>1.16.0</commons-codec.version>
     </properties>
     

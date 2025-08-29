@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,11 +15,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/cors"
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/time/rate"
 )
 
@@ -36,7 +40,8 @@ type Config struct {
 	Port                    string
 	PaymentServiceURL       string
 	RedisURL                string
-	JWTSecret               string
+	JWTSecret               []byte
+	AdminKey                string
 	RateLimitRPM            int
 	CircuitBreakerThreshold int
 	LogLevel                string
@@ -58,6 +63,13 @@ type CircuitBreaker struct {
 	timeout          time.Duration
 	lastFailTime     time.Time
 	state            string // "closed", "open", "half-open"
+}
+
+// Custom claims for JWT
+type Claims struct {
+	UserID string   `json:"user_id"`
+	Roles  []string `json:"roles"`
+	jwt.RegisteredClaims
 }
 
 // Metrics for monitoring
@@ -94,6 +106,14 @@ var (
 		},
 		[]string{"service"},
 	)
+
+	securityEvents = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "api_gateway_security_events_total",
+			Help: "Total number of security events",
+		},
+		[]string{"event_type", "client_ip"},
+	)
 )
 
 var startTime time.Time
@@ -105,6 +125,7 @@ func init() {
 	prometheus.MustRegister(requestDuration)
 	prometheus.MustRegister(rateLimitHits)
 	prometheus.MustRegister(circuitBreakerState)
+	prometheus.MustRegister(securityEvents)
 }
 
 func main() {
@@ -123,8 +144,11 @@ func main() {
 
 	// Setup graceful shutdown
 	server := &http.Server{
-		Addr:    ":" + config.Port,
-		Handler: gateway.router,
+		Addr:         ":" + config.Port,
+		Handler:      gateway.router,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {
@@ -151,11 +175,25 @@ func main() {
 }
 
 func loadConfig() *Config {
+	jwtSecret := getEnv("JWT_SECRET", "")
+	if jwtSecret == "" {
+		log.Println("⚠️  JWT_SECRET not set, generating secure secret")
+		jwtSecret = generateSecureSecret()
+	}
+
+	adminKey := getEnv("ADMIN_KEY", "")
+	if adminKey == "" {
+		log.Println("⚠️  ADMIN_KEY not set, generating secure key")
+		adminKey = generateSecureSecret()
+		log.Printf("Generated ADMIN_KEY: %s", adminKey)
+	}
+
 	return &Config{
 		Port:                    getEnv("PORT", "8080"),
 		PaymentServiceURL:       getEnv("PAYMENT_SERVICE_URL", "http://payment-service:8080"),
 		RedisURL:                getEnv("REDIS_URL", "redis:6379"),
-		JWTSecret:               getEnv("JWT_SECRET", "your-secret-key"),
+		JWTSecret:               []byte(jwtSecret),
+		AdminKey:                adminKey,
 		RateLimitRPM:            getEnvInt("RATE_LIMIT_RPM", 100),
 		CircuitBreakerThreshold: getEnvInt("CIRCUIT_BREAKER_THRESHOLD", 5),
 		LogLevel:                getEnv("LOG_LEVEL", "INFO"),
@@ -164,8 +202,12 @@ func loadConfig() *Config {
 
 func (g *Gateway) initRedis() {
 	g.redisClient = redis.NewClient(&redis.Options{
-		Addr: g.config.RedisURL,
-		DB:   0,
+		Addr:         g.config.RedisURL,
+		DB:           0,
+		MaxRetries:   3,
+		DialTimeout:  5 * time.Second,
+		ReadTimeout:  3 * time.Second,
+		WriteTimeout: 3 * time.Second,
 	})
 
 	// Test Redis connection
@@ -200,12 +242,16 @@ func (g *Gateway) initServices() {
 func (g *Gateway) setupRoutes() {
 	g.router = mux.NewRouter()
 
+	// Security headers middleware
+	g.router.Use(g.securityHeadersMiddleware)
+
 	// CORS configuration
 	c := cors.New(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   getEnvList("CORS_ALLOWED_ORIGINS", []string{"http://localhost:3000"}),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"*"},
+		AllowedHeaders:   []string{"Content-Type", "Authorization", "X-Requested-With"},
 		AllowCredentials: true,
+		MaxAge:           86400,
 	})
 
 	// Apply middleware
@@ -245,41 +291,21 @@ func (g *Gateway) setupRoutes() {
 	adminRoutes.HandleFunc("/rate-limits", g.rateLimitsHandler).Methods("GET")
 }
 
-// rateLimitsHandler provides information about current rate limiters.
-func (g *Gateway) rateLimitsHandler(w http.ResponseWriter, r *http.Request) {
-	type limiterInfo struct {
-		ClientIP string `json:"client_ip"`
-	}
-	limiters := []limiterInfo{}
-	for ip := range g.rateLimiters {
-		limiters = append(limiters, limiterInfo{ClientIP: ip})
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"rate_limiters": limiters,
-		"total":         len(limiters),
+// Middleware implementations
+
+func (g *Gateway) securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Security headers
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+
+		next.ServeHTTP(w, r)
 	})
 }
-
-// statsHandler provides basic gateway statistics for admin users.
-func (g *Gateway) statsHandler(w http.ResponseWriter, r *http.Request) {
-	stats := map[string]interface{}{
-		"uptime":        time.Since(startTime).String(),
-		"rate_limiters": len(g.rateLimiters),
-		"circuit_breakers": func() map[string]string {
-			cbStates := make(map[string]string)
-			for name, cb := range g.circuitBreakers {
-				cbStates[name] = cb.state
-			}
-			return cbStates
-		}(),
-		"redis_connected": g.checkRedisHealth() == "healthy",
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
-}
-
-// Middleware implementations
 
 func (g *Gateway) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -290,10 +316,16 @@ func (g *Gateway) loggingMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(rw, r)
 
+		// Sanitize logging - don't log sensitive data
+		uri := r.RequestURI
+		if strings.Contains(uri, "password") || strings.Contains(uri, "token") {
+			uri = "[REDACTED]"
+		}
+
 		log.Printf("[%s] %s %s %d %v",
 			r.Method,
-			r.RequestURI,
-			r.RemoteAddr,
+			uri,
+			getClientIP(r),
 			rw.statusCode,
 			time.Since(start),
 		)
@@ -310,14 +342,14 @@ func (g *Gateway) metricsMiddleware(next http.Handler) http.Handler {
 		// Record metrics
 		requestsTotal.WithLabelValues(
 			r.Method,
-			r.URL.Path,
+			sanitizePath(r.URL.Path),
 			strconv.Itoa(rw.statusCode),
 			"gateway",
 		).Inc()
 
 		requestDuration.WithLabelValues(
 			r.Method,
-			r.URL.Path,
+			sanitizePath(r.URL.Path),
 			"gateway",
 		).Observe(time.Since(start).Seconds())
 	})
@@ -331,13 +363,14 @@ func (g *Gateway) rateLimitMiddleware(next http.Handler) http.Handler {
 		limiter := g.getRateLimiter(clientIP)
 
 		if !limiter.Allow() {
-			rateLimitHits.WithLabelValues(clientIP, r.URL.Path).Inc()
+			rateLimitHits.WithLabelValues(clientIP, sanitizePath(r.URL.Path)).Inc()
+			securityEvents.WithLabelValues("rate_limit_exceeded", clientIP).Inc()
 
 			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(g.config.RateLimitRPM))
 			w.Header().Set("X-RateLimit-Remaining", "0")
 			w.Header().Set("Retry-After", "60")
 
-			http.Error(w, `{"error":"Rate limit exceeded","retry_after":60}`, http.StatusTooManyRequests)
+			http.Error(w, `{"error":"Rate limit exceeded"}`, http.StatusTooManyRequests)
 			return
 		}
 
@@ -355,29 +388,33 @@ func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
 
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			http.Error(w, `{"error":"Authorization header required"}`, http.StatusUnauthorized)
+			securityEvents.WithLabelValues("missing_auth_header", getClientIP(r)).Inc()
+			http.Error(w, `{"error":"Authorization required"}`, http.StatusUnauthorized)
 			return
 		}
 
-		// Basic JWT validation (in production, use proper JWT library)
 		token := strings.TrimPrefix(authHeader, "Bearer ")
-		if !g.validateJWT(token) {
-			http.Error(w, `{"error":"Invalid or expired token"}`, http.StatusUnauthorized)
+		claims, err := g.validateJWT(token)
+		if err != nil {
+			securityEvents.WithLabelValues("invalid_jwt", getClientIP(r)).Inc()
+			http.Error(w, `{"error":"Invalid token"}`, http.StatusUnauthorized)
 			return
 		}
 
 		// Add user context to request
-		r.Header.Set("X-User-ID", g.extractUserFromJWT(token))
+		r.Header.Set("X-User-ID", claims.UserID)
 		next.ServeHTTP(w, r)
 	})
 }
 
 func (g *Gateway) adminAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Additional admin authentication
 		adminKey := r.Header.Get("X-Admin-Key")
-		if adminKey != "admin-secret-key" { // In production, use proper admin auth
-			http.Error(w, `{"error":"Admin access required"}`, http.StatusForbidden)
+
+		// Use bcrypt to compare admin key
+		if err := bcrypt.CompareHashAndPassword([]byte(g.config.AdminKey), []byte(adminKey)); err != nil {
+			securityEvents.WithLabelValues("invalid_admin_key", getClientIP(r)).Inc()
+			http.Error(w, `{"error":"Admin access denied"}`, http.StatusForbidden)
 			return
 		}
 
@@ -418,7 +455,7 @@ func (g *Gateway) proxyToPaymentService(w http.ResponseWriter, r *http.Request) 
 	// Check circuit breaker
 	cb := g.circuitBreakers["payment-service"]
 	if !cb.canExecute() {
-		http.Error(w, `{"error":"Payment service temporarily unavailable"}`, http.StatusServiceUnavailable)
+		http.Error(w, `{"error":"Service temporarily unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
 
@@ -428,47 +465,54 @@ func (g *Gateway) proxyToPaymentService(w http.ResponseWriter, r *http.Request) 
 		targetURL += "?" + r.URL.RawQuery
 	}
 
-	proxyReq, err := http.NewRequest(r.Method, targetURL, r.Body)
+	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, r.Body)
 	if err != nil {
 		cb.recordFailure()
-		http.Error(w, `{"error":"Failed to create proxy request"}`, http.StatusInternalServerError)
+		http.Error(w, `{"error":"Request processing failed"}`, http.StatusInternalServerError)
 		return
 	}
 
-	// Copy headers
-	for key, values := range r.Header {
-		for _, value := range values {
-			proxyReq.Header.Add(key, value)
+	// Copy safe headers only
+	safeHeaders := []string{"Content-Type", "Accept", "User-Agent", "X-User-ID"}
+	for _, header := range safeHeaders {
+		if value := r.Header.Get(header); value != "" {
+			proxyReq.Header.Set(header, value)
 		}
 	}
 
 	// Add request ID for tracing
-	requestID := generateRequestID()
+	requestID := generateSecureRequestID()
 	proxyReq.Header.Set("X-Request-ID", requestID)
 	w.Header().Set("X-Request-ID", requestID)
 
 	resp, err := g.paymentService.Client.Do(proxyReq)
 	if err != nil {
 		cb.recordFailure()
-		http.Error(w, `{"error":"Payment service unavailable"}`, http.StatusServiceUnavailable)
+		log.Printf("Payment service error: %v", err)
+		http.Error(w, `{"error":"Service unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
 	defer resp.Body.Close()
 
 	cb.recordSuccess()
 
-	// Copy response
-	w.WriteHeader(resp.StatusCode)
-	for key, values := range resp.Header {
-		for _, value := range values {
-			w.Header().Add(key, value)
+	// Copy response headers (safe ones only)
+	safeResponseHeaders := []string{"Content-Type", "Content-Length", "X-Request-ID"}
+	for _, header := range safeResponseHeaders {
+		if value := resp.Header.Get(header); value != "" {
+			w.Header().Set(header, value)
 		}
 	}
 
-	// Copy body
+	w.WriteHeader(resp.StatusCode)
+
+	// Copy body with size limit
+	const maxResponseSize = 10 * 1024 * 1024 // 10MB limit
+	limitedReader := http.MaxBytesReader(w, resp.Body, maxResponseSize)
+
 	buf := make([]byte, 32*1024)
 	for {
-		n, err := resp.Body.Read(buf)
+		n, err := limitedReader.Read(buf)
 		if n > 0 {
 			w.Write(buf[:n])
 		}
@@ -479,7 +523,6 @@ func (g *Gateway) proxyToPaymentService(w http.ResponseWriter, r *http.Request) 
 }
 
 func (g *Gateway) fraudCheckHandler(w http.ResponseWriter, r *http.Request) {
-	// Basic fraud check implementation
 	var request struct {
 		Amount   float64 `json:"amount"`
 		Currency string  `json:"currency"`
@@ -487,13 +530,28 @@ func (g *Gateway) fraudCheckHandler(w http.ResponseWriter, r *http.Request) {
 		CardHash string  `json:"card_hash"`
 	}
 
+	// Limit request size
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024) // 1MB limit
+
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, `{"error":"Invalid request format"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"Invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Input validation
+	if request.Amount <= 0 || request.Amount > 1000000 {
+		http.Error(w, `{"error":"Invalid amount"}`, http.StatusBadRequest)
+		return
+	}
+
+	if request.UserID == "" || len(request.UserID) > 50 {
+		http.Error(w, `{"error":"Invalid user ID"}`, http.StatusBadRequest)
 		return
 	}
 
 	// Perform fraud checks using Redis
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	// Check velocity - number of transactions in last hour
 	velocityKey := fmt.Sprintf("velocity:%s:%s", request.UserID, time.Now().Format("2006-01-02:15"))
@@ -530,7 +588,7 @@ func (g *Gateway) fraudCheckHandler(w http.ResponseWriter, r *http.Request) {
 		"status":     status,
 		"risk_score": riskScore,
 		"reasons":    reasons,
-		"request_id": generateRequestID(),
+		"request_id": generateSecureRequestID(),
 		"timestamp":  time.Now().UTC(),
 	}
 
@@ -539,7 +597,6 @@ func (g *Gateway) fraudCheckHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) fraudReportHandler(w http.ResponseWriter, r *http.Request) {
-	// Handle fraud reporting
 	var report struct {
 		TransactionID string `json:"transaction_id"`
 		ReportType    string `json:"report_type"`
@@ -547,26 +604,104 @@ func (g *Gateway) fraudReportHandler(w http.ResponseWriter, r *http.Request) {
 		UserID        string `json:"user_id"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024) // 1MB limit
+
 	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
-		http.Error(w, `{"error":"Invalid request format"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"Invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Input validation
+	if len(report.Description) > 1000 {
+		http.Error(w, `{"error":"Description too long"}`, http.StatusBadRequest)
 		return
 	}
 
 	// Store fraud report in Redis for processing
-	reportKey := fmt.Sprintf("fraud_report:%s", generateRequestID())
-	reportData, _ := json.Marshal(report)
+	reportID := generateSecureRequestID()
+	reportKey := fmt.Sprintf("fraud_report:%s", reportID)
+	reportData, _ := json.Marshal(map[string]interface{}{
+		"transaction_id": report.TransactionID,
+		"report_type":    report.ReportType,
+		"description":    report.Description,
+		"user_id":        report.UserID,
+		"timestamp":      time.Now().UTC(),
+	})
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	g.redisClient.Set(ctx, reportKey, reportData, 24*time.Hour)
-
-	// Log for monitoring
-	log.Printf("Fraud report received: %+v", report)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":    "received",
-		"report_id": reportKey,
+		"report_id": reportID,
 	})
+}
+
+func (g *Gateway) statsHandler(w http.ResponseWriter, r *http.Request) {
+	stats := map[string]interface{}{
+		"uptime":        time.Since(startTime).String(),
+		"rate_limiters": len(g.rateLimiters),
+		"circuit_breakers": func() map[string]string {
+			cbStates := make(map[string]string)
+			for name, cb := range g.circuitBreakers {
+				cbStates[name] = cb.state
+			}
+			return cbStates
+		}(),
+		"redis_connected": g.checkRedisHealth() == "healthy",
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+func (g *Gateway) rateLimitsHandler(w http.ResponseWriter, r *http.Request) {
+	type limiterInfo struct {
+		ClientIP string `json:"client_ip"`
+	}
+	limiters := []limiterInfo{}
+	for ip := range g.rateLimiters {
+		limiters = append(limiters, limiterInfo{ClientIP: ip})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"rate_limiters": limiters,
+		"total":         len(limiters),
+	})
+}
+
+func (g *Gateway) circuitBreakerHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	service := vars["service"]
+	cb, ok := g.circuitBreakers[service]
+	if !ok {
+		http.Error(w, `{"error":"Service not found"}`, http.StatusNotFound)
+		return
+	}
+
+	switch r.Method {
+	case "GET":
+		state := map[string]interface{}{
+			"state":             cb.state,
+			"failure_count":     cb.failureCount,
+			"success_count":     cb.successCount,
+			"failure_threshold": cb.failureThreshold,
+			"timeout_seconds":   cb.timeout.Seconds(),
+			"last_fail_time":    cb.lastFailTime,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(state)
+	case "POST":
+		cb.state = "closed"
+		cb.failureCount = 0
+		cb.successCount = 0
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "reset"})
+	default:
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+	}
 }
 
 // Utility functions
@@ -582,18 +717,37 @@ func (g *Gateway) getRateLimiter(clientIP string) *rate.Limiter {
 	return limiter
 }
 
-func (g *Gateway) validateJWT(token string) bool {
-	// Basic JWT validation - in production use proper JWT library
-	return token != "" && len(token) > 10
-}
+func (g *Gateway) validateJWT(tokenString string) (*Claims, error) {
+	claims := &Claims{}
 
-func (g *Gateway) extractUserFromJWT(token string) string {
-	// Extract user ID from JWT - simplified implementation
-	return "user-" + token[:8]
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return g.config.JWTSecret, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if !token.Valid {
+		return nil, fmt.Errorf("invalid token")
+	}
+
+	return claims, nil
 }
 
 func (g *Gateway) checkServiceHealth(service *ServiceProxy) string {
-	resp, err := service.Client.Get(service.URL + "/health")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", service.URL+"/health", nil)
+	if err != nil {
+		return "unhealthy"
+	}
+
+	resp, err := service.Client.Do(req)
 	if err != nil {
 		return "unhealthy"
 	}
@@ -615,6 +769,18 @@ func (g *Gateway) checkRedisHealth() string {
 	return "healthy"
 }
 
+func generateSecureSecret() string {
+	bytes := make([]byte, 32)
+	rand.Read(bytes)
+	return base64.URLEncoding.EncodeToString(bytes)
+}
+
+func generateSecureRequestID() string {
+	bytes := make([]byte, 16)
+	rand.Read(bytes)
+	return base64.URLEncoding.EncodeToString(bytes)
+}
+
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -627,6 +793,13 @@ func getEnvInt(key string, defaultValue int) int {
 		if intValue, err := strconv.Atoi(value); err == nil {
 			return intValue
 		}
+	}
+	return defaultValue
+}
+
+func getEnvList(key string, defaultValue []string) []string {
+	if value := os.Getenv(key); value != "" {
+		return strings.Split(value, ",")
 	}
 	return defaultValue
 }
@@ -646,8 +819,12 @@ func getClientIP(r *http.Request) string {
 	return strings.Split(r.RemoteAddr, ":")[0]
 }
 
-func generateRequestID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+func sanitizePath(path string) string {
+	// Remove sensitive path components
+	if strings.Contains(path, "token") || strings.Contains(path, "password") {
+		return "[REDACTED]"
+	}
+	return path
 }
 
 // Circuit Breaker implementation
@@ -684,40 +861,6 @@ func (cb *CircuitBreaker) recordFailure() {
 
 	if cb.failureCount >= cb.failureThreshold {
 		cb.state = "open"
-	}
-}
-
-// Handler for circuit breaker admin endpoint
-func (g *Gateway) circuitBreakerHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	service := vars["service"]
-	cb, ok := g.circuitBreakers[service]
-	if !ok {
-		http.Error(w, `{"error":"Service not found"}`, http.StatusNotFound)
-		return
-	}
-
-	switch r.Method {
-	case "GET":
-		state := map[string]interface{}{
-			"state":             cb.state,
-			"failure_count":     cb.failureCount,
-			"success_count":     cb.successCount,
-			"failure_threshold": cb.failureThreshold,
-			"timeout_seconds":   cb.timeout.Seconds(),
-			"last_fail_time":    cb.lastFailTime,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(state)
-	case "POST":
-		// Allow admin to reset circuit breaker
-		cb.state = "closed"
-		cb.failureCount = 0
-		cb.successCount = 0
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "reset"})
-	default:
-		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
 	}
 }
 
