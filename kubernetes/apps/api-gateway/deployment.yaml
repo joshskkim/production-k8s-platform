@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
       - name: api-gateway
-        image: ghcr.io/joshskkim/production-k8s-platform/api-gateway:dbb42e3e2ba4e0ee9b9cc307ea5da90372be22de
+        image: ghcr.io/joshskkim/production-k8s-platform/api-gateway:b034caaeef325a9c55d825a8ae9b48a83082a39b
         ports:
         - containerPort: 8080
           name: http
