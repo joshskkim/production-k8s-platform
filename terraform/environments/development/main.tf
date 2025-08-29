@@ -2,7 +2,7 @@ terraform {
   required_version = ">= 1.0"
 
   backend "s3" {
-    bucket         = "your-terraform-state-bucket"
+    bucket         = "resume-kubernetes-bucket"
     key            = "development/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
@@ -78,11 +78,17 @@ module "payment_platform" {
   redis_multi_az_enabled           = false
 
   # ALB Configuration
-  domain_name            = "" # No custom domain for dev
-  certificate_arn        = ""
-  alb_ssl_policy         = "ELBSecurityPolicy-TLS-1-2-2017-01"
-  alb_enable_access_logs = false
+  ssl_certificate_arn   = null        # disables HTTPS (no cert)
+  ssl_policy            = null        # will fall back to default
+  alb_access_logs_enabled = false     # disables ALB logging
+  alb_access_logs_bucket  = ""        # no bucket since logs disabled
 
-  # Monitoring Configuration
-  cloudwatch_log_retention_days = 3
+  # Monitoring config
+  grafana_enabled       = false       # disables Grafana
+  loki_enabled          = false       # disables Loki
+
+  # (Prometheus is always on, but you can minimize resources if you don’t want it heavy)
+  prometheus_storage_size   = "1Gi"
+  prometheus_retention      = "1d"
+  prometheus_retention_size = "1GB"
 }
