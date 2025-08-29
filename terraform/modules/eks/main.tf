@@ -141,7 +141,7 @@ resource "aws_launch_template" "node_group" {
   block_device_mappings {
     device_name = "/dev/xvda"
     ebs {
-      volume_size = each.value.disk_size 
+      volume_size = each.value.disk_size
       volume_type = "gp3"
     }
   }

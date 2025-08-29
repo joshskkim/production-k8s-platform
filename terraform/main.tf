@@ -130,7 +130,7 @@ module "rds" {
   maintenance_window      = var.rds_maintenance_window
 
   # High availability
-  multi_az            = var.rds_multi_az
+  multi_az = var.rds_multi_az
   # create_read_replica = var.rds_create_read_replica
 
   # Monitoring
