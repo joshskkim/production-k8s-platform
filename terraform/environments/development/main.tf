@@ -51,18 +51,18 @@ module "payment_platform" {
   enable_aws_load_balancer_controller = true
 
   # RDS Configuration - Minimal for development
-  rds_engine                       = "postgres"
-  rds_engine_version               = "15.7"
-  rds_instance_class               = "db.t3.micro"
-  rds_database_name                = "payments"
-  rds_username                     = "payments_user"
-  rds_allocated_storage            = 20
-  rds_max_allocated_storage        = 50
-  rds_storage_encrypted            = false # Cost savings for dev
-  rds_backup_retention_period      = 1
-  rds_backup_window                = "03:00-04:00"
-  rds_maintenance_window           = "sun:04:00-sun:05:00"
-  rds_multi_az                     = false
+  rds_engine                  = "postgres"
+  rds_engine_version          = "15.7"
+  rds_instance_class          = "db.t3.micro"
+  rds_database_name           = "payments"
+  rds_username                = "payments_user"
+  rds_allocated_storage       = 20
+  rds_max_allocated_storage   = 50
+  rds_storage_encrypted       = false # Cost savings for dev
+  rds_backup_retention_period = 1
+  rds_backup_window           = "03:00-04:00"
+  rds_maintenance_window      = "sun:04:00-sun:05:00"
+  rds_multi_az                = false
   # rds_create_read_replica          = false
   rds_monitoring_interval          = 0
   rds_performance_insights_enabled = false

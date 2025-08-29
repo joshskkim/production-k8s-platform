@@ -8,7 +8,7 @@ Content-Type: text/x-shellscript; charset="us-ascii"
 # EKS Node User Data Script
 
 # Bootstrap the node with EKS cluster
-/etc/eks/bootstrap.sh ${cluster_name} ${bootstrap_arguments}
+/etc/eks/bootstrap.sh ${cluster_name}
 
 # Install additional packages if needed
 yum update -y
