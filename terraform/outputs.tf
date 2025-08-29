@@ -25,6 +25,20 @@ output "eks" {
   sensitive = true
 }
 
+output "cluster_name" {
+  description = "EKS cluster name"
+  value       = module.eks.cluster_name
+}
+
+output "deployment_info" {
+  description = "Deployment information"
+  value = {
+    cluster_name = module.eks.cluster_name
+    aws_region   = var.aws_region
+    environment  = var.environment
+  }
+}
+
 output "database" {
   description = "Database information"
   value = {

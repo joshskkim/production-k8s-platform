@@ -53,9 +53,21 @@ if aws eks describe-cluster --name "$CLUSTER_NAME" --region "$REGION" &>/dev/nul
     [ "$DRY_RUN" = "false" ] && sleep 60
 fi
 
-# 2. EKS Clusters
-echo "🚀 Step 2: EKS clusters"
+# 2. EKS Node Groups first
+echo "🚀 Step 2a: EKS node groups"
 CLUSTERS=$(aws eks list-clusters --region "$REGION" --output text --query "clusters[?contains(@, '$ENV')]" 2>/dev/null || echo "")
+for cluster in $CLUSTERS; do
+    NODE_GROUPS=$(aws eks list-nodegroups --cluster-name "$cluster" --region "$REGION" --output text --query "nodegroups[]" 2>/dev/null || echo "")
+    for ng in $NODE_GROUPS; do
+        safe_execute "aws eks delete-nodegroup --cluster-name '$cluster' --nodegroup-name '$ng' --region '$REGION'" "Delete nodegroup: $ng"
+    done
+done
+
+# Wait for node groups to delete
+[ "$DRY_RUN" = "false" ] && echo "⏳ Waiting for node groups to delete..." && sleep 120
+
+# 2b. EKS Clusters
+echo "🚀 Step 2b: EKS clusters"
 for cluster in $CLUSTERS; do
     safe_execute "aws eks delete-cluster --name '$cluster' --region '$REGION'" "Delete EKS cluster: $cluster"
 done
@@ -74,18 +86,20 @@ for tg_arn in $TG_ARNS; do
     safe_execute "aws elbv2 delete-target-group --target-group-arn '$tg_arn' --region '$REGION'" "Delete target group: $tg_arn"
 done
 
-# 5. RDS instances
+# 5. RDS instances - disable protection first
 echo "🚀 Step 5: RDS instances"
 RDS_INSTANCES=$(aws rds describe-db-instances --region "$REGION" --query "DBInstances[?contains(DBInstanceIdentifier, '$ENV-payment-platform')].DBInstanceIdentifier" --output text 2>/dev/null || echo "")
 for rds in $RDS_INSTANCES; do
+    safe_execute "aws rds modify-db-instance --db-instance-identifier '$rds' --no-deletion-protection --apply-immediately --region '$REGION'" "Disable deletion protection: $rds"
+    sleep 10
     safe_execute "aws rds delete-db-instance --db-instance-identifier '$rds' --skip-final-snapshot --region '$REGION'" "Delete RDS: $rds"
 done
 
-# 6. ElastiCache clusters  
+# 6. ElastiCache replication groups first, then clusters
 echo "🚀 Step 6: ElastiCache"
-CACHE_CLUSTERS=$(aws elasticache describe-cache-clusters --region "$REGION" --query "CacheClusters[?contains(CacheClusterId, '$ENV-payment-platform')].CacheClusterId" --output text 2>/dev/null || echo "")
-for cache in $CACHE_CLUSTERS; do
-    safe_execute "aws elasticache delete-cache-cluster --cache-cluster-id '$cache' --region '$REGION'" "Delete cache: $cache"
+REPL_GROUPS=$(aws elasticache describe-replication-groups --region "$REGION" --query "ReplicationGroups[?contains(ReplicationGroupId, '$ENV-payment-platform')].ReplicationGroupId" --output text 2>/dev/null || echo "")
+for rg in $REPL_GROUPS; do
+    safe_execute "aws elasticache delete-replication-group --replication-group-id '$rg' --region '$REGION'" "Delete replication group: $rg"
 done
 
 # 7. Auto Scaling Groups
@@ -120,13 +134,28 @@ for vpc_id in $VPC_IDS; do
     done
 done
 
-# 11. Security Groups (after everything else)
-echo "🚀 Step 11: Security Groups"
-sleep 30  # Wait for dependencies to clear
+# 11. Network interfaces first  
+echo "🚀 Step 11a: Network interfaces"
 for vpc_id in $VPC_IDS; do
-    SG_IDS=$(aws ec2 describe-security-groups --region "$REGION" --filters "Name=vpc-id,Values=$vpc_id" "Name=group-name,Values=*$ENV-payment-platform*" --query "SecurityGroups[?GroupName != 'default'].GroupId" --output text 2>/dev/null || echo "")
-    for sg in $SG_IDS; do
-        safe_execute "aws ec2 delete-security-group --group-id '$sg' --region '$REGION'" "Delete security group: $sg"
+    ENI_IDS=$(aws ec2 describe-network-interfaces --region "$REGION" --filters "Name=vpc-id,Values=$vpc_id" "Name=status,Values=available" --query "NetworkInterfaces[].NetworkInterfaceId" --output text 2>/dev/null || echo "")
+    for eni in $ENI_IDS; do
+        safe_execute "aws ec2 delete-network-interface --network-interface-id '$eni' --region '$REGION'" "Delete ENI: $eni"
+    done
+done
+
+# Wait for ENIs to cleanup
+[ "$DRY_RUN" = "false" ] && sleep 60
+
+# 11b. Security Groups (after everything else)
+echo "🚀 Step 11b: Security Groups"
+for vpc_id in $VPC_IDS; do
+    # Try multiple times as dependencies clear
+    for attempt in {1..3}; do
+        SG_IDS=$(aws ec2 describe-security-groups --region "$REGION" --filters "Name=vpc-id,Values=$vpc_id" "Name=group-name,Values=*$ENV-payment-platform*" --query "SecurityGroups[?GroupName != 'default'].GroupId" --output text 2>/dev/null || echo "")
+        for sg in $SG_IDS; do
+            safe_execute "aws ec2 delete-security-group --group-id '$sg' --region '$REGION'" "Delete security group: $sg (attempt $attempt)"
+        done
+        [ "$DRY_RUN" = "false" ] && sleep 30
     done
 done
 
