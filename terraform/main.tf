@@ -97,6 +97,9 @@ module "eks" {
   enable_cluster_autoscaler           = var.enable_cluster_autoscaler
   enable_aws_load_balancer_controller = var.enable_aws_load_balancer_controller
 
+  endpoint_private_access = var.endpoint_private_access
+  endpoint_public_access  = var.endpoint_public_access
+
   tags = local.common_tags
 
   depends_on = [module.vpc, module.security]
@@ -104,6 +107,7 @@ module "eks" {
 
 # RDS Module
 module "rds" {
+  count  = var.create_rds ? 1 : 0
   source = "./modules/rds"
 
   name_prefix = local.name_prefix
@@ -144,6 +148,7 @@ module "rds" {
 
 # ElastiCache Module
 module "elasticache" {
+  count  = var.create_elasticache ? 1 : 0
   source = "./modules/elasticache"
 
   name_prefix = local.name_prefix
@@ -172,6 +177,7 @@ module "elasticache" {
 
 # Application Load Balancer Module
 module "alb" {
+  count  = var.create_alb ? 1 : 0
   source = "./modules/alb"
 
   name_prefix = local.name_prefix
