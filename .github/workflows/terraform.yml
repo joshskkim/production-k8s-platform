@@ -1,3 +1,4 @@
+# .github/workflows/terraform.yml
 name: Terraform Deployment
 on:
   push:
@@ -10,43 +11,14 @@ jobs:
     strategy:
       matrix:
         environment: [development]
-
     steps:
-      - uses: actions/checkout@v4
-
-      # Configure AWS credentials
-      - uses: aws-actions/configure-aws-credentials@v3
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1  # replace with your region
-
-      - uses: hashicorp/setup-terraform@v2
-
-      # Terraform Init
-      - name: Terraform Init
-        run: |
-          cd terraform/environments/${{ matrix.environment }}
-          terraform init
-
-      # Terraform Plan
-      - name: Terraform Plan
-        run: |
-          cd terraform/environments/${{ matrix.environment }}
-          
-          CLUSTER_NAME=$(terraform output -raw cluster_name)
-          
-          aws eks update-kubeconfig --name $CLUSTER_NAME --region us-east-1
-          
-          terraform plan -var="kubeconfig_path=$HOME/.kube/config"
-
-      # Terraform Apply
-      - name: Terraform Apply
-        if: github.ref == 'refs/heads/main'
-        run: |
-          cd terraform/environments/${{ matrix.environment }}
-          
-          CLUSTER_NAME=$(terraform output -raw cluster_name)
-          aws eks update-kubeconfig --name $CLUSTER_NAME --region us-east-1
-          
-          terraform apply -auto-approve -var="kubeconfig_path=$HOME/.kube/config"
+    - uses: actions/checkout@v4
+    - uses: hashicorp/setup-terraform@v2
+    - name: Terraform Plan
+      run: |
+        cd terraform/environments/${{ matrix.environment }}
+        terraform init
+        terraform plan
+    - name: Terraform Apply
+      if: github.ref == 'refs/heads/main'
+      run: terraform apply -auto-approve
