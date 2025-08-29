@@ -130,7 +130,7 @@ resource "aws_launch_template" "node_group" {
 
   vpc_security_group_ids = [var.node_security_group_id]
 
-  user_data = base64encode(templatefile("${path.root}/templates/userdata.sh", {
+  user_data = base64encode(templatefile("${path.module}/../../templates/userdata.sh", {
     cluster_name        = aws_eks_cluster.main.name
     container_runtime   = "containerd"
     cluster_endpoint    = aws_eks_cluster.main.endpoint
