@@ -3,6 +3,9 @@ data "aws_caller_identity" "current" {}
 data "aws_availability_zones" "available" {
   state = "available"
 }
+data "aws_eks_cluster_auth" "main" {
+  name = module.eks.cluster_name
+}
 
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
@@ -241,10 +244,22 @@ module "alb" {
   depends_on = [module.vpc]
 }
 
+# Force EKS cluster to be ready before monitoring
+resource "null_resource" "wait_for_cluster" {
+  provisioner "local-exec" {
+    command = "aws eks wait cluster-active --name ${module.eks.cluster_name} --region ${var.aws_region}"
+  }
+
+  depends_on = [module.eks]
+}
+
 # Monitoring Module
 module "monitoring" {
   source = "./modules/monitoring"
 
+  eks_cluster_endpoint = module.eks.cluster_endpoint
+  eks_cluster_ca       = module.eks.cluster_certificate_authority_data
+  eks_cluster_token    = data.aws_eks_cluster_auth.main.token
   namespace  = "monitoring"
   aws_region = var.aws_region
 
@@ -377,5 +392,4 @@ module "monitoring" {
     }
   }
 
-  depends_on = [module.eks]
 }

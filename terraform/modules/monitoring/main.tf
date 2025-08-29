@@ -1,16 +1,3 @@
-terraform {
-  required_providers {
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.23"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.11"
-    }
-  }
-}
-
 # Create monitoring namespace
 resource "kubernetes_namespace" "monitoring" {
   provider = kubernetes
@@ -28,7 +15,6 @@ resource "kubernetes_namespace" "monitoring" {
 
 # Prometheus Operator CRDs
 resource "helm_release" "prometheus_operator_crds" {
-  provider   = helm
   name       = "prometheus-operator-crds"
   repository = "https://prometheus-community.github.io/helm-charts"
   chart      = "prometheus-operator-crds"
@@ -40,7 +26,6 @@ resource "helm_release" "prometheus_operator_crds" {
 
 # kube-prometheus-stack
 resource "helm_release" "kube_prometheus_stack" {
-  provider   = helm
   name       = "kube-prometheus-stack"
   repository = "https://prometheus-community.github.io/helm-charts"
   chart      = "kube-prometheus-stack"
