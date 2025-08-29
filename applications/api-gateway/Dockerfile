@@ -1,60 +1,40 @@
-# Multi-stage build for Go API Gateway
-# Optimized for production with minimal attack surface
-
 # Build stage
 FROM golang:1.21-alpine AS builder
 
-# Install security updates and build dependencies
-RUN apk update && apk add --no-cache \
-    git \
-    ca-certificates \
-    && rm -rf /var/cache/apk/*
+WORKDIR /app
 
-# Create non-root user for build
-RUN adduser -D -g '' appuser
+# Install dependencies
+RUN apk add --no-cache git ca-certificates tzdata
 
-# Set working directory
-WORKDIR /build
-
-# Copy go.mod first for better caching
-COPY go.mod ./
-
-# Copy go.sum if it exists, otherwise create empty file
-COPY go.su[m] ./
-
-# Download dependencies (this will generate go.sum if it doesn't exist)
-RUN go mod download && go mod verify
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
 
 # Copy source code
 COPY . .
 
-# Build the application with optimizations
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags='-w -s -extldflags "-static"' \
-    -a -installsuffix cgo \
-    -o api-gateway .
+# Build the binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o api-gateway .
 
-# Production stage
-FROM scratch
+# Final stage
+FROM alpine:3.19
 
-# Import CA certificates from builder
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+# Install ca-certificates for HTTPS requests
+RUN apk --no-cache add ca-certificates tzdata
 
-# Import user/group files
-COPY --from=builder /etc/passwd /etc/passwd
+WORKDIR /root/
 
-# Copy the binary
-COPY --from=builder /build/api-gateway /api-gateway
+# Copy the binary from builder stage
+COPY --from=builder /app/api-gateway .
 
-# Use non-root user
-USER appuser
-
-# Expose port
-EXPOSE 8080
+# Create non-root user
+RUN adduser -D -s /bin/sh apigateway
+USER apigateway
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/api-gateway", "-health-check"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
 
-# Run the binary
-ENTRYPOINT ["/api-gateway"]
+EXPOSE 8080
+
+CMD ["./api-gateway"]
