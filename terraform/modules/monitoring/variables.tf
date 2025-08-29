@@ -1,18 +1,3 @@
-variable "eks_cluster_endpoint" {
-  type        = string
-  description = "EKS cluster endpoint"
-}
-
-variable "eks_cluster_ca" {
-  type        = string
-  description = "EKS cluster CA certificate (base64)"
-}
-
-variable "eks_cluster_token" {
-  type        = string
-  description = "EKS cluster authentication token"
-}
-
 variable "namespace" {
   description = "Kubernetes namespace for monitoring stack"
   type        = string

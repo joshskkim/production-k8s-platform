@@ -4,6 +4,30 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+provider "kubernetes" {
+  host                   = module.eks.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name]
+  }
+}
+
+provider "helm" {
+  kubernetes {
+    host                   = module.eks.cluster_endpoint
+    cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+
+    exec {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name]
+    }
+  }
+}
+
 # Local values
 locals {
   name_prefix = "${var.environment}-${var.project_name}"
@@ -217,25 +241,12 @@ module "alb" {
   depends_on = [module.vpc]
 }
 
-data "aws_eks_cluster_auth" "main" {
-  name = module.eks.cluster_name
-}
-
-provider "kubernetes" {
-  host                   = module.eks.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-  token                  = data.aws_eks_cluster_auth.main.token
-}
-
 # Monitoring Module
 module "monitoring" {
   source = "./modules/monitoring"
 
-  eks_cluster_endpoint = module.eks.cluster_endpoint
-  eks_cluster_ca       = module.eks.cluster_certificate_authority_data
-  eks_cluster_token    = data.aws_eks_cluster_auth.main.token
-  namespace            = "monitoring"
-  aws_region           = var.aws_region
+  namespace  = "monitoring"
+  aws_region = var.aws_region
 
   # Storage configuration
   storage_class_name = "gp3"
@@ -366,4 +377,5 @@ module "monitoring" {
     }
   }
 
+  depends_on = [module.eks]
 }
