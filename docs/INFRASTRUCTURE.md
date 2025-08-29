@@ -54,7 +54,7 @@ Database Infrastructure
 ```
 
 **Features:**
-- **PostgreSQL 15.4** with automatic minor version updates
+- **PostgreSQL 15.7** with automatic minor version updates
 - **Read replicas** for read scaling
 - **Point-in-time recovery** and automated backups
 - **Redis cluster mode** for high availability

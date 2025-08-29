@@ -131,7 +131,7 @@ module "rds" {
 
   # High availability
   multi_az            = var.rds_multi_az
-  create_read_replica = var.rds_create_read_replica
+  # create_read_replica = var.rds_create_read_replica
 
   # Monitoring
   monitoring_interval          = var.rds_monitoring_interval

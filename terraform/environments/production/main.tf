@@ -73,7 +73,7 @@ module "payment_platform" {
 
   # RDS Configuration - Full production setup
   rds_engine                       = "postgres"
-  rds_engine_version               = "15.4"
+  rds_engine_version               = "15.7"
   rds_instance_class               = "db.r5.large"
   rds_database_name                = "payments"
   rds_username                     = "payments_user"

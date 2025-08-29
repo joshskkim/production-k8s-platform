@@ -45,7 +45,7 @@ variable "vpc_cidr" {
 variable "az_count" {
   description = "Number of Availability Zones to use"
   type        = number
-  default     = 3
+  default     = 2
 
   validation {
     condition     = var.az_count >= 2 && var.az_count <= 6
@@ -137,7 +137,7 @@ variable "rds_engine" {
 variable "rds_engine_version" {
   description = "RDS engine version"
   type        = string
-  default     = "15.6"
+  default     = "15.7"
 }
 
 variable "rds_instance_class" {
@@ -200,11 +200,11 @@ variable "rds_multi_az" {
   default     = true
 }
 
-variable "rds_create_read_replica" {
-  description = "Create read replica"
-  type        = bool
-  default     = true
-}
+# variable "rds_create_read_replica" {
+#   description = "Create read replica"
+#   type        = bool
+#   default     = true
+# }
 
 variable "rds_monitoring_interval" {
   description = "Enhanced monitoring interval (seconds)"

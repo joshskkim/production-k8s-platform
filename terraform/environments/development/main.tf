@@ -22,7 +22,7 @@ module "payment_platform" {
   # VPC Configuration
   vpc_cidr           = "10.2.0.0/16"
   az_count           = 2
-  enable_nat_gateway = false # Cost savings for dev
+  enable_nat_gateway = true # Cost savings for dev
   enable_vpn_gateway = false
 
   # EKS Configuration
@@ -52,7 +52,7 @@ module "payment_platform" {
 
   # RDS Configuration - Minimal for development
   rds_engine                       = "postgres"
-  rds_engine_version               = "15.4"
+  rds_engine_version               = "15.7"
   rds_instance_class               = "db.t3.micro"
   rds_database_name                = "payments"
   rds_username                     = "payments_user"

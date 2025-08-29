@@ -36,11 +36,11 @@ output "db_instance_password" {
   sensitive   = true
 }
 
-output "db_replica_endpoint" {
-  description = "RDS read replica endpoint"
-  value       = var.create_read_replica ? aws_db_instance.replica[0].endpoint : null
-  sensitive   = true
-}
+# output "db_replica_endpoint" {
+#   description = "RDS read replica endpoint"
+#   value       = var.create_read_replica ? aws_db_instance.replica[0].endpoint : null
+#   sensitive   = true
+# }
 
 output "db_subnet_group_id" {
   description = "Database subnet group ID"

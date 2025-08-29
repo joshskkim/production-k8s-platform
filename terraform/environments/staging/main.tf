@@ -52,7 +52,7 @@ module "payment_platform" {
 
   # RDS Configuration - Smaller for staging
   rds_engine                       = "postgres"
-  rds_engine_version               = "15.4"
+  rds_engine_version               = "15.7"
   rds_instance_class               = "db.t3.medium"
   rds_database_name                = "payments"
   rds_username                     = "payments_user"
