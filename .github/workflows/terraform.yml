@@ -1,32 +1,24 @@
-name: Terraform Validation
-
+# .github/workflows/terraform.yml
+name: Terraform Deployment
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches: [main]
+    paths: ['terraform/**']
 
 jobs:
   terraform:
     runs-on: ubuntu-latest
-    
+    strategy:
+      matrix:
+        environment: [development, staging, production]
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v2
-      with:
-        terraform_version: 1.6.0
-    
-    - name: Terraform Format Check
-      run: terraform fmt -check -recursive terraform/
-    
-    - name: Terraform Init
+    - uses: actions/checkout@v4
+    - uses: hashicorp/setup-terraform@v2
+    - name: Terraform Plan
       run: |
-        cd terraform
-        terraform init -backend=false
-    
-    - name: Terraform Validate
-      run: |
-        cd terraform
-        terraform validate
+        cd terraform/environments/${{ matrix.environment }}
+        terraform init
+        terraform plan
+    - name: Terraform Apply
+      if: github.ref == 'refs/heads/main'
+      run: terraform apply -auto-approve
