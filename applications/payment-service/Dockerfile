@@ -1,7 +1,7 @@
 # Payment Service Dockerfile
 # Save as: apps/payment-service/Dockerfile
 
-FROM eclipse-temurin:17-jdk-slim AS builder
+FROM eclipse-temurin:17-jdk AS builder
 
 WORKDIR /app
 COPY pom.xml .
@@ -14,7 +14,7 @@ RUN mvn dependency:go-offline -B
 # Build the application
 RUN mvn clean package -DskipTests
 
-FROM eclipse-temurin:17-jdk-slim
+FROM eclipse-temurin:17-jdk
 
 WORKDIR /app
 
