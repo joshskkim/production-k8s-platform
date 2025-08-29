@@ -1,40 +1,234 @@
 # .github/workflows/terraform.yml
-name: Terraform Deployment
+name: Terraform Deployment with Cleanup
 on:
   push:
     branches: [main]
     paths: ['terraform/**']
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+        - deploy
+        - cleanup
+      environment:
+        description: 'Environment to target'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+        - development
+        - staging
+        - production
+
+env:
+  AWS_REGION: us-east-1
 
 jobs:
-  terraform:
+  terraform-deploy:
+    if: ${{ github.event.inputs.action != 'cleanup' }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         environment: [development]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      # Configure AWS credentials BEFORE terraform init
-      - uses: aws-actions/configure-aws-credentials@v3
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
 
-      - uses: hashicorp/setup-terraform@v2
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: '3.12.0'
 
       - name: Terraform Init
         run: |
           cd terraform/environments/${{ matrix.environment }}
           terraform init
 
+      - name: Terraform Validate
+        run: |
+          cd terraform/environments/${{ matrix.environment }}
+          terraform validate
+
       - name: Terraform Plan
         run: |
           cd terraform/environments/${{ matrix.environment }}
-          terraform plan
+          terraform plan -out=tfplan
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main'
         run: |
           cd terraform/environments/${{ matrix.environment }}
-          terraform apply -auto-approve
+          terraform apply tfplan
+
+      - name: Deploy Monitoring Stack
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cd terraform/environments/${{ matrix.environment }}
+          # Wait for EKS cluster to be fully ready
+          sleep 60
+          # Deploy monitoring if script exists
+          if [ -f "./deploy-monitoring.sh" ]; then
+            chmod +x ./deploy-monitoring.sh
+            ./deploy-monitoring.sh
+          fi
+
+      - name: Verify Deployment
+        if: github.ref == 'refs/heads/main'
+        run: |
+          # Get cluster info
+          CLUSTER_NAME="${{ matrix.environment }}-payment-platform-cluster"
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name $CLUSTER_NAME
+          
+          echo "🔍 Cluster Status:"
+          kubectl get nodes
+          
+          echo "🔍 Monitoring Pods:"
+          kubectl get pods -n monitoring --ignore-not-found=true
+          
+          echo "🔍 All Namespaces:"
+          kubectl get ns
+
+      - name: Schedule Cleanup
+        if: github.ref == 'refs/heads/main' && matrix.environment == 'development'
+        run: |
+          echo "⏰ Cleanup scheduled for 2 hours from now"
+          echo "CLEANUP_TIME=$(date -d '+2 hours' -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
+
+  terraform-cleanup:
+    if: ${{ github.event.inputs.action == 'cleanup' || (github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[cleanup]')) }}
+    runs-on: ubuntu-latest
+    environment: cleanup-approval
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: '3.12.0'
+
+      - name: Determine Environment
+        run: |
+          ENV="${{ github.event.inputs.environment }}"
+          if [ -z "$ENV" ]; then
+            ENV="development"
+          fi
+          echo "ENVIRONMENT=$ENV" >> $GITHUB_ENV
+
+      - name: Cleanup Monitoring Stack
+        continue-on-error: true
+        run: |
+          CLUSTER_NAME="${{ env.ENVIRONMENT }}-payment-platform-cluster"
+          
+          # Try to connect to cluster
+          if aws eks describe-cluster --name $CLUSTER_NAME --region ${{ env.AWS_REGION }} &>/dev/null; then
+            aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name $CLUSTER_NAME
+            
+            cd terraform/environments/${{ env.ENVIRONMENT }}
+            if [ -f "./cleanup-monitoring.sh" ]; then
+              chmod +x ./cleanup-monitoring.sh
+              ./cleanup-monitoring.sh
+            fi
+            
+            # Manual cleanup of monitoring resources
+            helm uninstall promtail -n monitoring --ignore-not-found || true
+            helm uninstall loki -n monitoring --ignore-not-found || true
+            helm uninstall kube-prometheus-stack -n monitoring --ignore-not-found || true
+            helm uninstall prometheus-operator-crds -n monitoring --ignore-not-found || true
+            kubectl delete namespace monitoring --ignore-not-found=true || true
+          else
+            echo "⚠️ Cluster not found or not accessible, skipping monitoring cleanup"
+          fi
+
+      - name: Terraform Init for Cleanup
+        run: |
+          cd terraform/environments/${{ env.ENVIRONMENT }}
+          terraform init
+
+      - name: Terraform Destroy
+        run: |
+          cd terraform/environments/${{ env.ENVIRONMENT }}
+          terraform destroy -auto-approve
+
+      - name: Verify Cleanup
+        run: |
+          CLUSTER_NAME="${{ env.ENVIRONMENT }}-payment-platform-cluster"
+          
+          echo "🔍 Verifying AWS resources are cleaned up..."
+          
+          # Check if EKS cluster still exists
+          if aws eks describe-cluster --name $CLUSTER_NAME --region ${{ env.AWS_REGION }} &>/dev/null; then
+            echo "⚠️ EKS cluster still exists!"
+            exit 1
+          else
+            echo "✅ EKS cluster successfully deleted"
+          fi
+          
+          # Check for any remaining EKS resources
+          echo "🔍 Checking for remaining EKS resources..."
+          aws eks list-clusters --region ${{ env.AWS_REGION }} --query "clusters[?contains(@, '${{ env.ENVIRONMENT }}-payment-platform')]"
+
+  # Scheduled cleanup job (runs daily to catch any missed resources)
+  scheduled-cleanup:
+    if: github.event.schedule
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check for Old Development Resources
+        run: |
+          echo "🔍 Checking for development resources older than 24 hours..."
+          
+          # List all EKS clusters and check creation time
+          CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[*]' --output text)
+          
+          for cluster in $CLUSTERS; do
+            if [[ $cluster == *"development"* ]]; then
+              CREATED=$(aws eks describe-cluster --name $cluster --region ${{ env.AWS_REGION }} --query 'cluster.createdAt' --output text)
+              CREATED_TIMESTAMP=$(date -d "$CREATED" +%s)
+              CURRENT_TIMESTAMP=$(date +%s)
+              AGE_HOURS=$(( (CURRENT_TIMESTAMP - CREATED_TIMESTAMP) / 3600 ))
+              
+              if [ $AGE_HOURS -gt 24 ]; then
+                echo "⚠️ Found old development cluster: $cluster (${AGE_HOURS} hours old)"
+                echo "CLEANUP_NEEDED=true" >> $GITHUB_ENV
+              fi
+            fi
+          done
+
+# Add scheduled trigger for daily cleanup check
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Run daily at 2 AM UTC
