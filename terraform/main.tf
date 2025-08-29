@@ -235,7 +235,7 @@ module "monitoring" {
   eks_cluster_ca       = module.eks.cluster_certificate_authority_data
   eks_cluster_token    = data.aws_eks_cluster_auth.main.token
   namespace            = "monitoring"
-  aws_region = var.aws_region
+  aws_region           = var.aws_region
   providers = {
     kubernetes = kubernetes
   }

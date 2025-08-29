@@ -28,7 +28,7 @@ resource "kubernetes_namespace" "monitoring" {
 
 # Prometheus Operator CRDs
 resource "helm_release" "prometheus_operator_crds" {
-  provider  = helm
+  provider   = helm
   name       = "prometheus-operator-crds"
   repository = "https://prometheus-community.github.io/helm-charts"
   chart      = "prometheus-operator-crds"
@@ -49,8 +49,8 @@ resource "helm_release" "kube_prometheus_stack" {
 
   # (all your set blocks here)
   values = [yamlencode({
-    prometheus = { prometheusSpec = { additionalScrapeConfigs = var.additional_scrape_configs } }
-    grafana    = {}
+    prometheus   = { prometheusSpec = { additionalScrapeConfigs = var.additional_scrape_configs } }
+    grafana      = {}
     alertmanager = { config = var.alertmanager_config }
   })]
 
@@ -63,7 +63,7 @@ resource "helm_release" "kube_prometheus_stack" {
 # Loki
 resource "helm_release" "loki" {
   provider = helm
-  count = var.loki_enabled ? 1 : 0
+  count    = var.loki_enabled ? 1 : 0
 
   name       = "loki"
   repository = "https://grafana.github.io/helm-charts"
@@ -78,7 +78,7 @@ resource "helm_release" "loki" {
 # Promtail
 resource "helm_release" "promtail" {
   provider = helm
-  count = var.loki_enabled ? 1 : 0
+  count    = var.loki_enabled ? 1 : 0
 
   name       = "promtail"
   repository = "https://grafana.github.io/helm-charts"
@@ -108,11 +108,11 @@ resource "kubernetes_manifest" "service_monitors" {
     metadata = {
       name      = each.key
       namespace = var.namespace
-      labels = merge({ app = each.key }, each.value.labels)
+      labels    = merge({ app = each.key }, each.value.labels)
     }
     spec = {
-      selector = { matchLabels = each.value.selector }
-      endpoints = each.value.endpoints
+      selector          = { matchLabels = each.value.selector }
+      endpoints         = each.value.endpoints
       namespaceSelector = { matchNames = each.value.namespaces }
     }
   }
