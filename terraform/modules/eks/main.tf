@@ -141,7 +141,7 @@ resource "aws_launch_template" "node_group" {
   block_device_mappings {
     device_name = "/dev/xvda"
     ebs {
-      volume_size = each.value.disk_size # <-- add this
+      volume_size = each.value.disk_size 
       volume_type = "gp3"
     }
   }
@@ -169,7 +169,6 @@ resource "aws_eks_node_group" "main" {
 
   instance_types = each.value.instance_types
   capacity_type  = each.value.capacity_type
-  disk_size      = each.value.disk_size
 
   scaling_config {
     desired_size = each.value.scaling_config.desired_size
