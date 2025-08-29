@@ -1,89 +1,119 @@
-# VPC Module - Production-grade networking with security best practices
+# Local values for subnet calculations
+locals {
+  # Calculate subnet CIDRs
+  # Public: 10.0.1.0/24, 10.0.2.0/24, 10.0.3.0/24
+  # Private: 10.0.11.0/24, 10.0.12.0/24, 10.0.13.0/24
+  # Database: 10.0.21.0/24, 10.0.22.0/24, 10.0.23.0/24
 
-# Main VPC resource with DNS support for EKS
+  public_subnets = [
+    for i, az in var.azs : cidrsubnet(var.vpc_cidr, 8, i + 1)
+  ]
+
+  private_subnets = [
+    for i, az in var.azs : cidrsubnet(var.vpc_cidr, 8, i + 11)
+  ]
+
+  database_subnets = [
+    for i, az in var.azs : cidrsubnet(var.vpc_cidr, 8, i + 21)
+  ]
+}
+
+# VPC
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
-  enable_dns_hostnames = true
-  enable_dns_support   = true
+  enable_dns_hostnames = var.enable_dns_hostnames
+  enable_dns_support   = var.enable_dns_support
 
-  tags = {
-    Name                                           = "${var.environment}-vpc"
-    Environment                                    = var.environment
-    "kubernetes.io/cluster/${var.environment}-eks" = "shared"
-  }
+  tags = merge(var.tags, {
+    Name                                               = "${var.name_prefix}-vpc"
+    "kubernetes.io/cluster/${var.name_prefix}-cluster" = "shared"
+  })
 }
 
-# Internet Gateway for public subnet connectivity
+# Internet Gateway
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
-  tags = {
-    Name        = "${var.environment}-igw"
-    Environment = var.environment
-  }
+
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-igw"
+  })
 }
 
-# Public subnets for load balancers and NAT gateways
+# Public Subnets
 resource "aws_subnet" "public" {
-  count = length(var.availability_zones)
+  count = length(var.azs)
 
   vpc_id                  = aws_vpc.main.id
-  cidr_block              = cidrsubnet(var.vpc_cidr, 8, count.index)
-  availability_zone       = var.availability_zones[count.index]
+  cidr_block              = local.public_subnets[count.index]
+  availability_zone       = var.azs[count.index]
   map_public_ip_on_launch = true
 
-  tags = {
-    Name                                           = "${var.environment}-public-${count.index + 1}"
-    Environment                                    = var.environment
-    Type                                           = "public"
-    "kubernetes.io/cluster/${var.environment}-eks" = "shared"
-    "kubernetes.io/role/elb"                       = "1"
-  }
+  tags = merge(var.tags, {
+    Name                                               = "${var.name_prefix}-public-subnet-${count.index + 1}"
+    Type                                               = "public"
+    "kubernetes.io/cluster/${var.name_prefix}-cluster" = "shared"
+    "kubernetes.io/role/elb"                           = "1"
+  })
 }
 
-# Private subnets for EKS worker nodes and databases
+# Private Subnets
 resource "aws_subnet" "private" {
-  count = length(var.availability_zones)
+  count = length(var.azs)
 
   vpc_id            = aws_vpc.main.id
-  cidr_block        = cidrsubnet(var.vpc_cidr, 8, count.index + 10)
-  availability_zone = var.availability_zones[count.index]
+  cidr_block        = local.private_subnets[count.index]
+  availability_zone = var.azs[count.index]
 
-  tags = {
-    Name                                           = "${var.environment}-private-${count.index + 1}"
-    Environment                                    = var.environment
-    Type                                           = "private"
-    "kubernetes.io/cluster/${var.environment}-eks" = "owned"
-    "kubernetes.io/role/internal-elb"              = "1"
-  }
+  tags = merge(var.tags, {
+    Name                                               = "${var.name_prefix}-private-subnet-${count.index + 1}"
+    Type                                               = "private"
+    "kubernetes.io/cluster/${var.name_prefix}-cluster" = "owned"
+    "kubernetes.io/role/internal-elb"                  = "1"
+  })
+}
+
+# Database Subnets
+resource "aws_subnet" "database" {
+  count = length(var.azs)
+
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = local.database_subnets[count.index]
+  availability_zone = var.azs[count.index]
+
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-database-subnet-${count.index + 1}"
+    Type = "database"
+  })
 }
 
 # Elastic IPs for NAT Gateways
 resource "aws_eip" "nat" {
-  count  = length(var.availability_zones)
+  count = var.enable_nat_gateway ? length(aws_subnet.public) : 0
+
   domain = "vpc"
 
-  tags = {
-    Name        = "${var.environment}-nat-eip-${count.index + 1}"
-    Environment = var.environment
-  }
-}
-
-# NAT Gateways for private subnet internet access
-resource "aws_nat_gateway" "main" {
-  count = length(var.availability_zones)
-
-  allocation_id = aws_eip.nat[count.index].id
-  subnet_id     = aws_subnet.public[count.index].id
-
-  tags = {
-    Name        = "${var.environment}-nat-${count.index + 1}"
-    Environment = var.environment
-  }
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-nat-eip-${count.index + 1}"
+  })
 
   depends_on = [aws_internet_gateway.main]
 }
 
-# Route table for public subnets
+# NAT Gateways
+resource "aws_nat_gateway" "main" {
+  count = var.enable_nat_gateway ? length(aws_subnet.public) : 0
+
+  allocation_id = aws_eip.nat[count.index].id
+  subnet_id     = aws_subnet.public[count.index].id
+
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-nat-gateway-${count.index + 1}"
+  })
+
+  depends_on = [aws_internet_gateway.main]
+}
+
+# Route Table - Public
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
@@ -92,61 +122,143 @@ resource "aws_route_table" "public" {
     gateway_id = aws_internet_gateway.main.id
   }
 
-  tags = {
-    Name        = "${var.environment}-public-rt"
-    Environment = var.environment
-  }
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-public-rt"
+  })
 }
 
-# Route tables for private subnets (one per AZ for HA)
+# Route Tables - Private
 resource "aws_route_table" "private" {
-  count  = length(var.availability_zones)
+  count = var.enable_nat_gateway ? length(aws_nat_gateway.main) : 1
+
   vpc_id = aws_vpc.main.id
 
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.main[count.index].id
+  dynamic "route" {
+    for_each = var.enable_nat_gateway ? [1] : []
+    content {
+      cidr_block     = "0.0.0.0/0"
+      nat_gateway_id = aws_nat_gateway.main[count.index].id
+    }
   }
 
-  tags = {
-    Name        = "${var.environment}-private-rt-${count.index + 1}"
-    Environment = var.environment
-  }
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-private-rt-${count.index + 1}"
+  })
 }
 
-# Associate public subnets with public route table
+# Route Tables - Database
+resource "aws_route_table" "database" {
+  count = length(aws_subnet.database) > 0 ? 1 : 0
+
+  vpc_id = aws_vpc.main.id
+
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-database-rt"
+  })
+}
+
+# Route Table Associations - Public
 resource "aws_route_table_association" "public" {
-  count = length(var.availability_zones)
+  count = length(aws_subnet.public)
 
   subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
 }
 
-# Associate private subnets with their respective route tables
+# Route Table Associations - Private
 resource "aws_route_table_association" "private" {
-  count = length(var.availability_zones)
+  count = length(aws_subnet.private)
 
   subnet_id      = aws_subnet.private[count.index].id
-  route_table_id = aws_route_table.private[count.index].id
+  route_table_id = var.enable_nat_gateway ? aws_route_table.private[count.index].id : aws_route_table.private[0].id
 }
 
-# Outputs for use by other modules
-output "vpc_id" {
-  description = "ID of the VPC"
-  value       = aws_vpc.main.id
+# Route Table Associations - Database
+resource "aws_route_table_association" "database" {
+  count = length(aws_subnet.database)
+
+  subnet_id      = aws_subnet.database[count.index].id
+  route_table_id = aws_route_table.database[0].id
 }
 
-output "public_subnet_ids" {
-  description = "IDs of public subnets"
-  value       = aws_subnet.public[*].id
+# VPN Gateway (optional)
+resource "aws_vpn_gateway" "main" {
+  count = var.enable_vpn_gateway ? 1 : 0
+
+  vpc_id = aws_vpc.main.id
+
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-vpn-gateway"
+  })
 }
 
-output "private_subnet_ids" {
-  description = "IDs of private subnets"
-  value       = aws_subnet.private[*].id
+# VPC Flow Logs
+resource "aws_flow_log" "main" {
+  count = var.enable_flow_logs ? 1 : 0
+
+  iam_role_arn    = aws_iam_role.flow_log[0].arn
+  log_destination = aws_cloudwatch_log_group.vpc_flow_logs[0].arn
+  traffic_type    = "ALL"
+  vpc_id          = aws_vpc.main.id
+
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-vpc-flow-logs"
+  })
 }
 
-output "vpc_cidr_block" {
-  description = "CIDR block of the VPC"
-  value       = aws_vpc.main.cidr_block
+# CloudWatch Log Group for VPC Flow Logs
+resource "aws_cloudwatch_log_group" "vpc_flow_logs" {
+  count = var.enable_flow_logs ? 1 : 0
+
+  name              = "/aws/vpc/${var.name_prefix}/flowlogs"
+  retention_in_days = var.flow_logs_retention_days
+
+  tags = var.tags
+}
+
+# IAM Role for VPC Flow Logs
+resource "aws_iam_role" "flow_log" {
+  count = var.enable_flow_logs ? 1 : 0
+
+  name = "${var.name_prefix}-vpc-flow-log-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "vpc-flow-logs.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+# IAM Policy for VPC Flow Logs
+resource "aws_iam_role_policy" "flow_log" {
+  count = var.enable_flow_logs ? 1 : 0
+
+  name = "${var.name_prefix}-vpc-flow-log-policy"
+  role = aws_iam_role.flow_log[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams"
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      }
+    ]
+  })
 }
