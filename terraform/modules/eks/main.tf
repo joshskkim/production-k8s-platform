@@ -130,12 +130,19 @@ resource "aws_launch_template" "node_group" {
 
   vpc_security_group_ids = [var.node_security_group_id]
 
-  user_data = base64encode(templatefile("${path.module}/../../templates/userdata.sh", {
-    cluster_name        = aws_eks_cluster.main.name
-    container_runtime   = "containerd"
-    cluster_endpoint    = aws_eks_cluster.main.endpoint
-    cluster_ca          = aws_eks_cluster.main.certificate_authority[0].data
-    bootstrap_arguments = var.bootstrap_arguments
+  user_data = base64encode(mime_multipart({
+    parts = [
+      {
+        content_type = "text/x-shellscript"
+        content      = templatefile("${path.module}/../../templates/userdata.sh", {
+                          cluster_name        = aws_eks_cluster.main.name
+                          container_runtime   = "containerd"
+                          cluster_endpoint    = aws_eks_cluster.main.endpoint
+                          cluster_ca          = aws_eks_cluster.main.certificate_authority[0].data
+                          bootstrap_arguments = var.bootstrap_arguments
+                        })
+      }
+    ]
   }))
 
   block_device_mappings {
