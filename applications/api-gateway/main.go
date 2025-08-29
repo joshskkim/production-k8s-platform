@@ -33,13 +33,13 @@ type Gateway struct {
 
 // Config holds the gateway configuration
 type Config struct {
-	Port                string
-	PaymentServiceURL   string
-	RedisURL           string
-	JWTSecret          string
-	RateLimitRPM       int
+	Port                    string
+	PaymentServiceURL       string
+	RedisURL                string
+	JWTSecret               string
+	RateLimitRPM            int
 	CircuitBreakerThreshold int
-	LogLevel           string
+	LogLevel                string
 }
 
 // ServiceProxy represents a backend service proxy
@@ -52,12 +52,12 @@ type ServiceProxy struct {
 
 // CircuitBreaker implements a basic circuit breaker pattern
 type CircuitBreaker struct {
-	failureCount    int
-	successCount    int
+	failureCount     int
+	successCount     int
 	failureThreshold int
-	timeout         time.Duration
-	lastFailTime    time.Time
-	state          string // "closed", "open", "half-open"
+	timeout          time.Duration
+	lastFailTime     time.Time
+	state            string // "closed", "open", "half-open"
 }
 
 // Metrics for monitoring
@@ -69,7 +69,7 @@ var (
 		},
 		[]string{"method", "endpoint", "status", "service"},
 	)
-	
+
 	requestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "api_gateway_request_duration_seconds",
@@ -78,7 +78,7 @@ var (
 		},
 		[]string{"method", "endpoint", "service"},
 	)
-	
+
 	rateLimitHits = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "api_gateway_rate_limit_hits_total",
@@ -86,7 +86,7 @@ var (
 		},
 		[]string{"client_ip", "endpoint"},
 	)
-	
+
 	circuitBreakerState = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "api_gateway_circuit_breaker_state",
@@ -96,7 +96,10 @@ var (
 	)
 )
 
+var startTime time.Time
+
 func init() {
+	startTime = time.Now()
 	// Register Prometheus metrics
 	prometheus.MustRegister(requestsTotal)
 	prometheus.MustRegister(requestDuration)
@@ -106,56 +109,56 @@ func init() {
 
 func main() {
 	config := loadConfig()
-	
+
 	gateway := &Gateway{
 		config:          config,
 		rateLimiters:    make(map[string]*rate.Limiter),
 		circuitBreakers: make(map[string]*CircuitBreaker),
 	}
-	
+
 	// Initialize components
 	gateway.initRedis()
 	gateway.initServices()
 	gateway.setupRoutes()
-	
+
 	// Setup graceful shutdown
 	server := &http.Server{
 		Addr:    ":" + config.Port,
 		Handler: gateway.router,
 	}
-	
+
 	go func() {
 		log.Printf("🚀 API Gateway starting on port %s", config.Port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}
 	}()
-	
+
 	// Wait for interrupt signal to gracefully shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	
+
 	log.Println("🛑 Shutting down API Gateway...")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	
+
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatalf("Gateway forced to shutdown: %v", err)
 	}
-	
+
 	log.Println("✅ API Gateway stopped")
 }
 
 func loadConfig() *Config {
 	return &Config{
-		Port:                   getEnv("PORT", "8080"),
-		PaymentServiceURL:      getEnv("PAYMENT_SERVICE_URL", "http://payment-service:8080"),
-		RedisURL:              getEnv("REDIS_URL", "redis:6379"),
-		JWTSecret:             getEnv("JWT_SECRET", "your-secret-key"),
-		RateLimitRPM:          getEnvInt("RATE_LIMIT_RPM", 100),
+		Port:                    getEnv("PORT", "8080"),
+		PaymentServiceURL:       getEnv("PAYMENT_SERVICE_URL", "http://payment-service:8080"),
+		RedisURL:                getEnv("REDIS_URL", "redis:6379"),
+		JWTSecret:               getEnv("JWT_SECRET", "your-secret-key"),
+		RateLimitRPM:            getEnvInt("RATE_LIMIT_RPM", 100),
 		CircuitBreakerThreshold: getEnvInt("CIRCUIT_BREAKER_THRESHOLD", 5),
-		LogLevel:              getEnv("LOG_LEVEL", "INFO"),
+		LogLevel:                getEnv("LOG_LEVEL", "INFO"),
 	}
 }
 
@@ -164,11 +167,11 @@ func (g *Gateway) initRedis() {
 		Addr: g.config.RedisURL,
 		DB:   0,
 	})
-	
+
 	// Test Redis connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	if err := g.redisClient.Ping(ctx).Err(); err != nil {
 		log.Printf("⚠️  Redis connection failed: %v", err)
 	} else {
@@ -185,18 +188,18 @@ func (g *Gateway) initServices() {
 			Timeout: 30 * time.Second,
 		},
 	}
-	
+
 	// Initialize circuit breaker for payment service
 	g.circuitBreakers["payment-service"] = &CircuitBreaker{
 		failureThreshold: g.config.CircuitBreakerThreshold,
-		timeout:         60 * time.Second,
-		state:          "closed",
+		timeout:          60 * time.Second,
+		state:            "closed",
 	}
 }
 
 func (g *Gateway) setupRoutes() {
 	g.router = mux.NewRouter()
-	
+
 	// CORS configuration
 	c := cors.New(cors.Options{
 		AllowedOrigins:   []string{"*"},
@@ -204,42 +207,76 @@ func (g *Gateway) setupRoutes() {
 		AllowedHeaders:   []string{"*"},
 		AllowCredentials: true,
 	})
-	
+
 	// Apply middleware
 	g.router.Use(g.loggingMiddleware)
 	g.router.Use(g.metricsMiddleware)
 	g.router.Use(g.rateLimitMiddleware)
 	g.router.Use(c.Handler)
-	
+
 	// Health check endpoint
 	g.router.HandleFunc("/health", g.healthHandler).Methods("GET")
 	g.router.HandleFunc("/ready", g.readinessHandler).Methods("GET")
-	
+
 	// Metrics endpoint for Prometheus
 	g.router.Handle("/metrics", promhttp.Handler()).Methods("GET")
-	
+
 	// API versioning
 	v1 := g.router.PathPrefix("/api/v1").Subrouter()
 	v1.Use(g.authMiddleware)
-	
+
 	// Payment service routes
 	paymentRoutes := v1.PathPrefix("/payments").Subrouter()
 	paymentRoutes.HandleFunc("/process", g.proxyToPaymentService).Methods("POST")
 	paymentRoutes.HandleFunc("/status/{id}", g.proxyToPaymentService).Methods("GET")
 	paymentRoutes.HandleFunc("/history", g.proxyToPaymentService).Methods("GET")
 	paymentRoutes.HandleFunc("/refund", g.proxyToPaymentService).Methods("POST")
-	
+
 	// Fraud detection routes
 	fraudRoutes := v1.PathPrefix("/fraud").Subrouter()
 	fraudRoutes.HandleFunc("/check", g.fraudCheckHandler).Methods("POST")
 	fraudRoutes.HandleFunc("/report", g.fraudReportHandler).Methods("POST")
-	
-	// Admin routes (with additional auth)
-	adminRoutes := g.router.PathPrefix("/admin").Subrouter()
+
+	// Admin routes
+	adminRoutes := v1.PathPrefix("/admin").Subrouter()
 	adminRoutes.Use(g.adminAuthMiddleware)
 	adminRoutes.HandleFunc("/stats", g.statsHandler).Methods("GET")
 	adminRoutes.HandleFunc("/circuit-breaker/{service}", g.circuitBreakerHandler).Methods("GET", "POST")
 	adminRoutes.HandleFunc("/rate-limits", g.rateLimitsHandler).Methods("GET")
+}
+
+// rateLimitsHandler provides information about current rate limiters.
+func (g *Gateway) rateLimitsHandler(w http.ResponseWriter, r *http.Request) {
+	type limiterInfo struct {
+		ClientIP string `json:"client_ip"`
+	}
+	limiters := []limiterInfo{}
+	for ip := range g.rateLimiters {
+		limiters = append(limiters, limiterInfo{ClientIP: ip})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"rate_limiters": limiters,
+		"total":         len(limiters),
+	})
+}
+
+// statsHandler provides basic gateway statistics for admin users.
+func (g *Gateway) statsHandler(w http.ResponseWriter, r *http.Request) {
+	stats := map[string]interface{}{
+		"uptime":        time.Since(startTime).String(),
+		"rate_limiters": len(g.rateLimiters),
+		"circuit_breakers": func() map[string]string {
+			cbStates := make(map[string]string)
+			for name, cb := range g.circuitBreakers {
+				cbStates[name] = cb.state
+			}
+			return cbStates
+		}(),
+		"redis_connected": g.checkRedisHealth() == "healthy",
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }
 
 // Middleware implementations
@@ -247,12 +284,12 @@ func (g *Gateway) setupRoutes() {
 func (g *Gateway) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		
+
 		// Create a response writer that captures the status code
 		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-		
+
 		next.ServeHTTP(rw, r)
-		
+
 		log.Printf("[%s] %s %s %d %v",
 			r.Method,
 			r.RequestURI,
@@ -267,9 +304,9 @@ func (g *Gateway) metricsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-		
+
 		next.ServeHTTP(rw, r)
-		
+
 		// Record metrics
 		requestsTotal.WithLabelValues(
 			r.Method,
@@ -277,7 +314,7 @@ func (g *Gateway) metricsMiddleware(next http.Handler) http.Handler {
 			strconv.Itoa(rw.statusCode),
 			"gateway",
 		).Inc()
-		
+
 		requestDuration.WithLabelValues(
 			r.Method,
 			r.URL.Path,
@@ -289,21 +326,21 @@ func (g *Gateway) metricsMiddleware(next http.Handler) http.Handler {
 func (g *Gateway) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clientIP := getClientIP(r)
-		
+
 		// Get or create rate limiter for this IP
 		limiter := g.getRateLimiter(clientIP)
-		
+
 		if !limiter.Allow() {
 			rateLimitHits.WithLabelValues(clientIP, r.URL.Path).Inc()
-			
+
 			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(g.config.RateLimitRPM))
 			w.Header().Set("X-RateLimit-Remaining", "0")
 			w.Header().Set("Retry-After", "60")
-			
+
 			http.Error(w, `{"error":"Rate limit exceeded","retry_after":60}`, http.StatusTooManyRequests)
 			return
 		}
-		
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -315,20 +352,20 @@ func (g *Gateway) authMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		
+
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			http.Error(w, `{"error":"Authorization header required"}`, http.StatusUnauthorized)
 			return
 		}
-		
+
 		// Basic JWT validation (in production, use proper JWT library)
 		token := strings.TrimPrefix(authHeader, "Bearer ")
 		if !g.validateJWT(token) {
 			http.Error(w, `{"error":"Invalid or expired token"}`, http.StatusUnauthorized)
 			return
 		}
-		
+
 		// Add user context to request
 		r.Header.Set("X-User-ID", g.extractUserFromJWT(token))
 		next.ServeHTTP(w, r)
@@ -343,7 +380,7 @@ func (g *Gateway) adminAuthMiddleware(next http.Handler) http.Handler {
 			http.Error(w, `{"error":"Admin access required"}`, http.StatusForbidden)
 			return
 		}
-		
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -357,17 +394,17 @@ func (g *Gateway) healthHandler(w http.ResponseWriter, r *http.Request) {
 		"version":   "1.0.0",
 		"services": map[string]string{
 			"payment-service": g.checkServiceHealth(g.paymentService),
-			"redis":          g.checkRedisHealth(),
+			"redis":           g.checkRedisHealth(),
 		},
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(health)
 }
 
 func (g *Gateway) readinessHandler(w http.ResponseWriter, r *http.Request) {
 	ready := g.checkServiceHealth(g.paymentService) == "healthy" && g.checkRedisHealth() == "healthy"
-	
+
 	if ready {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
@@ -384,32 +421,32 @@ func (g *Gateway) proxyToPaymentService(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, `{"error":"Payment service temporarily unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
-	
+
 	// Forward request to payment service
 	targetURL := g.paymentService.URL + r.URL.Path
 	if r.URL.RawQuery != "" {
 		targetURL += "?" + r.URL.RawQuery
 	}
-	
+
 	proxyReq, err := http.NewRequest(r.Method, targetURL, r.Body)
 	if err != nil {
 		cb.recordFailure()
 		http.Error(w, `{"error":"Failed to create proxy request"}`, http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Copy headers
 	for key, values := range r.Header {
 		for _, value := range values {
 			proxyReq.Header.Add(key, value)
 		}
 	}
-	
+
 	// Add request ID for tracing
 	requestID := generateRequestID()
 	proxyReq.Header.Set("X-Request-ID", requestID)
 	w.Header().Set("X-Request-ID", requestID)
-	
+
 	resp, err := g.paymentService.Client.Do(proxyReq)
 	if err != nil {
 		cb.recordFailure()
@@ -417,9 +454,9 @@ func (g *Gateway) proxyToPaymentService(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer resp.Body.Close()
-	
+
 	cb.recordSuccess()
-	
+
 	// Copy response
 	w.WriteHeader(resp.StatusCode)
 	for key, values := range resp.Header {
@@ -427,7 +464,7 @@ func (g *Gateway) proxyToPaymentService(w http.ResponseWriter, r *http.Request) 
 			w.Header().Add(key, value)
 		}
 	}
-	
+
 	// Copy body
 	buf := make([]byte, 32*1024)
 	for {
@@ -449,54 +486,54 @@ func (g *Gateway) fraudCheckHandler(w http.ResponseWriter, r *http.Request) {
 		UserID   string  `json:"user_id"`
 		CardHash string  `json:"card_hash"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, `{"error":"Invalid request format"}`, http.StatusBadRequest)
 		return
 	}
-	
+
 	// Perform fraud checks using Redis
 	ctx := context.Background()
-	
+
 	// Check velocity - number of transactions in last hour
 	velocityKey := fmt.Sprintf("velocity:%s:%s", request.UserID, time.Now().Format("2006-01-02:15"))
 	velocity, _ := g.redisClient.Incr(ctx, velocityKey).Result()
 	g.redisClient.Expire(ctx, velocityKey, time.Hour)
-	
+
 	// Risk scoring
 	riskScore := 0
 	reasons := []string{}
-	
+
 	if request.Amount > 10000 {
 		riskScore += 30
 		reasons = append(reasons, "High amount transaction")
 	}
-	
+
 	if velocity > 5 {
 		riskScore += 50
 		reasons = append(reasons, "High velocity detected")
 	}
-	
+
 	if request.Currency != "USD" {
 		riskScore += 10
 		reasons = append(reasons, "Foreign currency")
 	}
-	
+
 	status := "approved"
 	if riskScore > 70 {
 		status = "denied"
 	} else if riskScore > 30 {
 		status = "review"
 	}
-	
+
 	response := map[string]interface{}{
-		"status":      status,
-		"risk_score":  riskScore,
-		"reasons":     reasons,
-		"request_id":  generateRequestID(),
-		"timestamp":   time.Now().UTC(),
+		"status":     status,
+		"risk_score": riskScore,
+		"reasons":    reasons,
+		"request_id": generateRequestID(),
+		"timestamp":  time.Now().UTC(),
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -509,22 +546,22 @@ func (g *Gateway) fraudReportHandler(w http.ResponseWriter, r *http.Request) {
 		Description   string `json:"description"`
 		UserID        string `json:"user_id"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
 		http.Error(w, `{"error":"Invalid request format"}`, http.StatusBadRequest)
 		return
 	}
-	
+
 	// Store fraud report in Redis for processing
 	reportKey := fmt.Sprintf("fraud_report:%s", generateRequestID())
 	reportData, _ := json.Marshal(report)
-	
+
 	ctx := context.Background()
 	g.redisClient.Set(ctx, reportKey, reportData, 24*time.Hour)
-	
+
 	// Log for monitoring
 	log.Printf("Fraud report received: %+v", report)
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":    "received",
@@ -538,7 +575,7 @@ func (g *Gateway) getRateLimiter(clientIP string) *rate.Limiter {
 	if limiter, exists := g.rateLimiters[clientIP]; exists {
 		return limiter
 	}
-	
+
 	// Create new rate limiter: requests per minute
 	limiter := rate.NewLimiter(rate.Every(time.Minute/time.Duration(g.config.RateLimitRPM)), g.config.RateLimitRPM)
 	g.rateLimiters[clientIP] = limiter
@@ -561,7 +598,7 @@ func (g *Gateway) checkServiceHealth(service *ServiceProxy) string {
 		return "unhealthy"
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode == http.StatusOK {
 		return "healthy"
 	}
@@ -571,7 +608,7 @@ func (g *Gateway) checkServiceHealth(service *ServiceProxy) string {
 func (g *Gateway) checkRedisHealth() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	
+
 	if err := g.redisClient.Ping(ctx).Err(); err != nil {
 		return "unhealthy"
 	}
@@ -599,12 +636,12 @@ func getClientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		return strings.Split(xff, ",")[0]
 	}
-	
+
 	// Check X-Real-IP header
 	if xri := r.Header.Get("X-Real-IP"); xri != "" {
 		return xri
 	}
-	
+
 	// Fall back to remote address
 	return strings.Split(r.RemoteAddr, ":")[0]
 }
@@ -644,9 +681,43 @@ func (cb *CircuitBreaker) recordSuccess() {
 func (cb *CircuitBreaker) recordFailure() {
 	cb.failureCount++
 	cb.lastFailTime = time.Now()
-	
+
 	if cb.failureCount >= cb.failureThreshold {
 		cb.state = "open"
+	}
+}
+
+// Handler for circuit breaker admin endpoint
+func (g *Gateway) circuitBreakerHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	service := vars["service"]
+	cb, ok := g.circuitBreakers[service]
+	if !ok {
+		http.Error(w, `{"error":"Service not found"}`, http.StatusNotFound)
+		return
+	}
+
+	switch r.Method {
+	case "GET":
+		state := map[string]interface{}{
+			"state":             cb.state,
+			"failure_count":     cb.failureCount,
+			"success_count":     cb.successCount,
+			"failure_threshold": cb.failureThreshold,
+			"timeout_seconds":   cb.timeout.Seconds(),
+			"last_fail_time":    cb.lastFailTime,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(state)
+	case "POST":
+		// Allow admin to reset circuit breaker
+		cb.state = "closed"
+		cb.failureCount = 0
+		cb.successCount = 0
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "reset"})
+	default:
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
 	}
 }
 
