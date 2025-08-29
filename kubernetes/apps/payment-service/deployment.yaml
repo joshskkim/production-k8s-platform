@@ -24,7 +24,7 @@ spec:
       serviceAccountName: payment-service
       containers:
       - name: payment-service
-        image: ghcr.io/joshskkim/production-k8s-platform/payment-service:dbb42e3e2ba4e0ee9b9cc307ea5da90372be22de
+        image: ghcr.io/joshskkim/production-k8s-platform/payment-service:93194b2d249a0e15e343423d82e9f8e8246cf970
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
