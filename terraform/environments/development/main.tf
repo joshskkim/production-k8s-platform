@@ -2,7 +2,7 @@
 
 terraform {
   required_version = ">= 1.0"
-  
+
   # Optional: Remove S3 backend for dev to avoid state conflicts
   # backend "s3" {
   #   bucket = "resume-kubernetes-bucket"
@@ -21,15 +21,15 @@ module "payment_platform" {
   aws_region   = "us-east-1"
 
   # Minimal VPC - single AZ, public subnets only
-  vpc_cidr           = "10.2.0.0/16" 
-  az_count           = 1  # Single AZ
+  vpc_cidr           = "10.2.0.0/16"
+  az_count           = 1 # Single AZ
   enable_nat_gateway = false
   enable_vpn_gateway = false
 
   # EKS - public endpoint, minimal resources
   cluster_version         = "1.28"
-  endpoint_private_access = false  # Keep it simple
-  endpoint_public_access  = true   # Easy access
+  endpoint_private_access = false # Keep it simple
+  endpoint_public_access  = true  # Easy access
 
   node_groups = {
     main = {
@@ -39,10 +39,10 @@ module "payment_platform" {
         max_size     = 2
         min_size     = 1
       }
-      disk_size     = 20  # Minimal
+      disk_size     = 20 # Minimal
       capacity_type = "SPOT"
       labels = {
-        role = "main"
+        role        = "main"
         environment = "development"
       }
       taints = []
@@ -55,17 +55,17 @@ module "payment_platform" {
   enable_irsa                         = false
 
   # Skip RDS and Redis entirely for dev
-  create_rds        = false
+  create_rds         = false
   create_elasticache = false
 
   # Skip ALB 
   create_alb = false
 
   # Minimal monitoring - Prometheus only
-  grafana_enabled = false
-  loki_enabled    = false
+  grafana_enabled         = false
+  loki_enabled            = false
   prometheus_storage_size = "1Gi"
-  prometheus_retention = "1d"
+  prometheus_retention    = "1d"
 }
 
 # Simple outputs

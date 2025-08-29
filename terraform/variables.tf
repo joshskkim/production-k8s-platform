@@ -151,7 +151,7 @@ variable "endpoint_private_access" {
 }
 
 variable "endpoint_public_access" {
-  description = "Enable public API server endpoint" 
+  description = "Enable public API server endpoint"
   type        = bool
   default     = false
 }
