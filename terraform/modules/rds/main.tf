@@ -163,9 +163,8 @@ resource "aws_db_instance" "main" {
 
   # Performance Insights
   performance_insights_enabled          = var.performance_insights_enabled
-  performance_insights_kms_key_id       = var.performance_insights_enabled && var.performance_insights_kms_key_id != null ? var.performance_insights_kms_key_id : aws_kms_key.rds.arn
-  performance_insights_retention_period = var.performance_insights_retention_period
-
+  performance_insights_kms_key_id       = var.performance_insights_enabled && var.performance_insights_kms_key_id != null ? var.performance_insights_kms_key_id : (var.performance_insights_enabled ? aws_kms_key.rds.arn : null)
+  performance_insights_retention_period = var.performance_insights_enabled ? var.performance_insights_retention_period : null
   # Logs
   enabled_cloudwatch_logs_exports = var.enabled_cloudwatch_logs_exports
 
