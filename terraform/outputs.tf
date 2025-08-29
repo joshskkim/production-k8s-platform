@@ -31,33 +31,33 @@ output "cluster_name" {
 }
 
 output "database" {
-  description = "Database information"
-  value = {
-    db_instance_id       = module.rds.db_instance_id
-    db_instance_endpoint = module.rds.db_instance_endpoint
-    db_instance_port     = module.rds.db_instance_port
-    db_instance_name     = module.rds.db_instance_name
-    db_secret_arn        = module.rds.db_secret_arn
-  }
-  sensitive = true
+  description = "Database connection information"
+  value = var.create_rds ? {
+    db_instance_id       = module.rds[0].db_instance_id
+    db_instance_endpoint = module.rds[0].db_instance_endpoint
+    db_instance_port     = module.rds[0].db_instance_port
+    db_instance_name     = module.rds[0].db_instance_name
+    db_secret_arn        = module.rds[0].db_secret_arn
+  } : null
 }
 
 output "cache" {
-  description = "ElastiCache information"
-  value = {
-    primary_endpoint_address = module.elasticache.primary_endpoint_address
-    reader_endpoint_address  = module.elasticache.reader_endpoint_address
-    port                     = module.elasticache.port
-    auth_token_secret_arn    = module.elasticache.auth_token_secret_arn
-  }
-  sensitive = true
+  description = "Cache connection information"
+  value = var.create_elasticache ? {
+    primary_endpoint_address = module.elasticache[0].primary_endpoint_address
+    reader_endpoint_address  = module.elasticache[0].reader_endpoint_address
+    port                     = module.elasticache[0].port
+    auth_token_secret_arn    = module.elasticache[0].auth_token_secret_arn
+  } : null
 }
 
-output "load_balancer" {
+output "load balancer" {
   description = "Load balancer information"
-  value       = module.alb
+  value = var.create_alb ? {
+    dns_name = module.alb[0].alb_dns_name
+    zone_id  = module.alb[0].alb_zone_id
+  } : null
 }
-
 output "security_groups" {
   description = "Security group information"
   value = {
