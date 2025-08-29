@@ -1,4 +1,3 @@
-# terraform/variables.tf
 # Root module variables
 
 # General Configuration
@@ -269,33 +268,180 @@ variable "redis_multi_az_enabled" {
 }
 
 # ALB Configuration
-variable "domain_name" {
-  description = "Domain name for the application"
+variable "ssl_certificate_arn" {
+  description = "ARN of SSL certificate for HTTPS"
   type        = string
-  default     = ""
+  default     = null
 }
 
-variable "certificate_arn" {
-  description = "ARN of the SSL certificate"
-  type        = string
-  default     = ""
-}
-
-variable "alb_ssl_policy" {
-  description = "SSL policy for ALB"
+variable "ssl_policy" {
+  description = "SSL policy for ALB HTTPS listener"
   type        = string
   default     = "ELBSecurityPolicy-TLS-1-2-2017-01"
 }
 
-variable "alb_enable_access_logs" {
+variable "alb_access_logs_enabled" {
   description = "Enable ALB access logs"
+  type        = bool
+  default     = false
+}
+
+variable "alb_access_logs_bucket" {
+  description = "S3 bucket for ALB access logs"
+  type        = string
+  default     = ""
+}
+
+# Monitoring Configuration
+variable "prometheus_storage_size" {
+  description = "Prometheus storage size"
+  type        = string
+  default     = "50Gi"
+}
+
+variable "prometheus_retention" {
+  description = "Prometheus retention period"
+  type        = string
+  default     = "30d"
+}
+
+variable "prometheus_retention_size" {
+  description = "Prometheus retention size"
+  type        = string
+  default     = "45GB"
+}
+
+variable "prometheus_cpu_request" {
+  description = "Prometheus CPU request"
+  type        = string
+  default     = "200m"
+}
+
+variable "prometheus_memory_request" {
+  description = "Prometheus memory request"
+  type        = string
+  default     = "2Gi"
+}
+
+variable "prometheus_cpu_limit" {
+  description = "Prometheus CPU limit"
+  type        = string
+  default     = "1000m"
+}
+
+variable "prometheus_memory_limit" {
+  description = "Prometheus memory limit"
+  type        = string
+  default     = "4Gi"
+}
+
+variable "grafana_enabled" {
+  description = "Enable Grafana"
   type        = bool
   default     = true
 }
 
-# Monitoring Configuration
-variable "cloudwatch_log_retention_days" {
-  description = "CloudWatch log retention period (days)"
+variable "grafana_admin_password" {
+  description = "Grafana admin password"
+  type        = string
+  default     = "change-me-in-production"
+  sensitive   = true
+}
+
+variable "grafana_persistence_enabled" {
+  description = "Enable Grafana persistence"
+  type        = bool
+  default     = true
+}
+
+variable "grafana_storage_size" {
+  description = "Grafana storage size"
+  type        = string
+  default     = "10Gi"
+}
+
+variable "grafana_cpu_request" {
+  description = "Grafana CPU request"
+  type        = string
+  default     = "100m"
+}
+
+variable "grafana_memory_request" {
+  description = "Grafana memory request"
+  type        = string
+  default     = "128Mi"
+}
+
+variable "grafana_cpu_limit" {
+  description = "Grafana CPU limit"
+  type        = string
+  default     = "500m"
+}
+
+variable "grafana_memory_limit" {
+  description = "Grafana memory limit"
+  type        = string
+  default     = "512Mi"
+}
+
+variable "loki_enabled" {
+  description = "Enable Loki"
+  type        = bool
+  default     = true
+}
+
+variable "loki_storage_type" {
+  description = "Loki storage type"
+  type        = string
+  default     = "filesystem"
+}
+
+variable "loki_s3_bucket" {
+  description = "S3 bucket for Loki"
+  type        = string
+  default     = ""
+}
+
+variable "loki_read_replicas" {
+  description = "Loki read replicas"
   type        = number
-  default     = 7
+  default     = 1
+}
+
+variable "loki_write_replicas" {
+  description = "Loki write replicas"
+  type        = number
+  default     = 1
+}
+
+variable "loki_backend_replicas" {
+  description = "Loki backend replicas"
+  type        = number
+  default     = 1
+}
+
+# AlertManager notification variables
+variable "smtp_smarthost" {
+  description = "SMTP smarthost for AlertManager"
+  type        = string
+  default     = "localhost:587"
+}
+
+variable "smtp_from" {
+  description = "SMTP from address for AlertManager"
+  type        = string
+  default     = "alertmanager@example.org"
+}
+
+variable "slack_webhook_url" {
+  description = "Slack webhook URL for AlertManager"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "slack_channel" {
+  description = "Slack channel for AlertManager"
+  type        = string
+  default     = "#alerts"
 }

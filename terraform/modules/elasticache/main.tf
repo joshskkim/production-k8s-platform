@@ -66,13 +66,8 @@ resource "aws_elasticache_replication_group" "redis" {
   num_cache_clusters = var.cluster_mode_enabled ? null : var.num_cache_clusters
 
   # Cluster mode configuration (for Redis)
-  dynamic "num_node_groups" {
-    for_each = var.cluster_mode_enabled ? [1] : []
-    content {
-      num_node_groups         = var.num_node_groups
-      replicas_per_node_group = var.replicas_per_node_group
-    }
-  }
+  num_node_groups         = var.cluster_mode_enabled ? var.num_node_groups : null
+  replicas_per_node_group = var.cluster_mode_enabled ? var.replicas_per_node_group : null
 
   # Security
   at_rest_encryption_enabled = var.at_rest_encryption_enabled
@@ -139,12 +134,7 @@ resource "aws_elasticache_cluster" "memcached" {
   notification_topic_arn = var.notification_topic_arn
 
   # Availability Zone configuration for Memcached
-  dynamic "preferred_availability_zones" {
-    for_each = length(var.preferred_availability_zones) > 0 ? [var.preferred_availability_zones] : []
-    content {
-      preferred_availability_zones = preferred_availability_zones.value
-    }
-  }
+  preferred_availability_zones = length(var.preferred_availability_zones) > 0 ? var.preferred_availability_zones : null
 
   # Log delivery configuration
   dynamic "log_delivery_configuration" {

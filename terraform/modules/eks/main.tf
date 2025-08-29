@@ -130,7 +130,7 @@ resource "aws_launch_template" "node_group" {
 
   vpc_security_group_ids = [var.node_security_group_id]
 
-  user_data = base64encode(templatefile("${path.module}/user-data.sh", {
+  user_data = base64encode(templatefile("${path.root}/templates/userdata.sh", {
     cluster_name        = aws_eks_cluster.main.name
     container_runtime   = "containerd"
     cluster_endpoint    = aws_eks_cluster.main.endpoint
@@ -255,6 +255,10 @@ resource "aws_iam_role" "aws_load_balancer_controller" {
 }
 
 # IAM Policy for AWS Load Balancer Controller
+data "http" "alb_controller_policy" {
+  url = "https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json"
+}
+
 resource "aws_iam_policy" "aws_load_balancer_controller" {
   count = var.enable_aws_load_balancer_controller && var.enable_irsa ? 1 : 0
 
@@ -262,7 +266,7 @@ resource "aws_iam_policy" "aws_load_balancer_controller" {
   path        = "/"
   description = "IAM policy for AWS Load Balancer Controller"
 
-  policy = file("${path.module}/policies/aws-load-balancer-controller-policy.json")
+  policy = data.http.alb_controller_policy.response_body
 
   tags = var.tags
 }

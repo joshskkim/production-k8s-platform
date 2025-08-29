@@ -1,24 +1,3 @@
-# Root module - orchestrates all infrastructure components
-
-terraform {
-  required_version = ">= 1.0"
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.23"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.11"
-    }
-  }
-}
-
 # Data sources
 data "aws_caller_identity" "current" {}
 data "aws_availability_zones" "available" {
@@ -171,35 +150,223 @@ module "alb" {
   name_prefix = local.name_prefix
   vpc_id      = module.vpc.vpc_id
 
-  public_subnet_ids  = module.vpc.public_subnet_ids
-  security_group_ids = [module.security.alb_security_group_id]
+  # SSL certificate ARN (optional)
+  ssl_certificate_arn = var.ssl_certificate_arn
+  ssl_policy          = var.ssl_policy
 
-  # SSL/TLS configuration
-  domain_name     = var.domain_name
-  certificate_arn = var.certificate_arn
-  ssl_policy      = var.alb_ssl_policy
+  # Access logs configuration
+  access_logs_enabled = var.alb_access_logs_enabled
+  access_logs_bucket  = var.alb_access_logs_bucket
+  access_logs_prefix  = "${local.name_prefix}/alb"
 
-  # Access logs
-  enable_access_logs = var.alb_enable_access_logs
+  # Target groups for different services
+  target_groups = {
+    api-gateway = {
+      port         = 8080
+      protocol     = "HTTP"
+      priority     = 100
+      path_pattern = "/api/*"
+      health_check = {
+        enabled             = true
+        healthy_threshold   = 2
+        interval            = 30
+        matcher             = "200"
+        path                = "/api/health"
+        protocol            = "HTTP"
+        timeout             = 5
+        unhealthy_threshold = 2
+      }
+    }
+
+    frontend = {
+      port         = 80
+      protocol     = "HTTP"
+      priority     = 200
+      path_pattern = "/*"
+      health_check = {
+        enabled             = true
+        healthy_threshold   = 2
+        interval            = 30
+        matcher             = "200"
+        path                = "/health"
+        protocol            = "HTTP"
+        timeout             = 5
+        unhealthy_threshold = 2
+      }
+    }
+
+    monitoring = {
+      port     = 3000
+      protocol = "HTTP"
+      priority = 300
+      health_check = {
+        enabled             = true
+        healthy_threshold   = 2
+        interval            = 30
+        matcher             = "200"
+        path                = "/api/health"
+        protocol            = "HTTP"
+        timeout             = 5
+        unhealthy_threshold = 2
+      }
+    }
+  }
 
   tags = local.common_tags
 
-  depends_on = [module.vpc, module.security]
+  depends_on = [module.vpc]
+}
+
+data "aws_eks_cluster_auth" "main" {
+  name = module.eks.cluster_name
+}
+
+provider "kubernetes" {
+  host                   = module.eks.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+  token                  = data.aws_eks_cluster_auth.main.token
 }
 
 # Monitoring Module
 module "monitoring" {
   source = "./modules/monitoring"
 
-  name_prefix = local.name_prefix
+  eks_cluster_endpoint = module.eks.cluster_endpoint
+  eks_cluster_ca       = module.eks.cluster_certificate_authority_data
+  eks_cluster_token    = data.aws_eks_cluster_auth.main.token
+  namespace            = "monitoring"
+  aws_region = var.aws_region
+  providers = {
+    kubernetes = kubernetes
+  }
 
-  # CloudWatch configuration
-  log_retention_days = var.cloudwatch_log_retention_days
+  # Storage configuration
+  storage_class_name = "gp3"
 
-  # EKS cluster information for logging
-  cluster_name = module.eks.cluster_name
+  # Prometheus settings
+  prometheus_storage_size   = var.prometheus_storage_size
+  prometheus_retention      = var.prometheus_retention
+  prometheus_retention_size = var.prometheus_retention_size
+  prometheus_cpu_request    = var.prometheus_cpu_request
+  prometheus_memory_request = var.prometheus_memory_request
+  prometheus_cpu_limit      = var.prometheus_cpu_limit
+  prometheus_memory_limit   = var.prometheus_memory_limit
 
-  tags = local.common_tags
+  # Grafana settings
+  grafana_enabled             = var.grafana_enabled
+  grafana_admin_password      = var.grafana_admin_password
+  grafana_persistence_enabled = var.grafana_persistence_enabled
+  grafana_storage_size        = var.grafana_storage_size
+  grafana_cpu_request         = var.grafana_cpu_request
+  grafana_memory_request      = var.grafana_memory_request
+  grafana_cpu_limit           = var.grafana_cpu_limit
+  grafana_memory_limit        = var.grafana_memory_limit
 
-  depends_on = [module.eks]
+  # Loki settings
+  loki_enabled          = var.loki_enabled
+  loki_storage_type     = var.loki_storage_type
+  loki_s3_bucket        = var.loki_s3_bucket
+  loki_read_replicas    = var.loki_read_replicas
+  loki_write_replicas   = var.loki_write_replicas
+  loki_backend_replicas = var.loki_backend_replicas
+
+  # AlertManager configuration
+  alertmanager_config = {
+    global = {
+      smtp_smarthost = var.smtp_smarthost
+      smtp_from      = var.smtp_from
+    }
+    route = {
+      group_by        = ["alertname", "cluster", "service"]
+      group_wait      = "10s"
+      group_interval  = "10s"
+      repeat_interval = "12h"
+      receiver        = "default"
+    }
+    receivers = [
+      {
+        name = "default"
+        slack_configs = [
+          {
+            api_url       = var.slack_webhook_url
+            channel       = var.slack_channel
+            username      = "AlertManager"
+            color         = "danger"
+            title         = "{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}"
+            text          = "{{ range .Alerts }}{{ .Annotations.description }}{{ end }}"
+            send_resolved = true
+          }
+        ]
+      }
+    ]
+  }
+
+  # Service monitors for custom applications
+  service_monitors = {
+    api-gateway = {
+      selector = {
+        app = "api-gateway"
+      }
+      endpoints = [
+        {
+          port     = "metrics"
+          interval = "30s"
+          path     = "/metrics"
+        }
+      ]
+      namespaces = ["default"]
+    }
+
+    postgres-exporter = {
+      selector = {
+        app = "postgres-exporter"
+      }
+      endpoints = [
+        {
+          port     = "metrics"
+          interval = "30s"
+          path     = "/metrics"
+        }
+      ]
+      namespaces = ["default"]
+    }
+  }
+
+  # Custom Prometheus rules
+  prometheus_rules = {
+    application-rules = {
+      groups = [
+        {
+          name = "application.rules"
+          rules = [
+            {
+              alert = "HighErrorRate"
+              expr  = "rate(http_requests_total{status=~\"5..\"}[5m]) > 0.1"
+              for   = "5m"
+              labels = {
+                severity = "warning"
+              }
+              annotations = {
+                summary     = "High error rate detected"
+                description = "Error rate is {{ $value }} per second for {{ $labels.instance }}"
+              }
+            },
+            {
+              alert = "HighLatency"
+              expr  = "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 0.5"
+              for   = "10m"
+              labels = {
+                severity = "warning"
+              }
+              annotations = {
+                summary     = "High latency detected"
+                description = "95th percentile latency is {{ $value }}s for {{ $labels.instance }}"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+
 }
