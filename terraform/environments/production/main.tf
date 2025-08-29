@@ -71,7 +71,7 @@ module "payment_platform" {
   enable_cluster_autoscaler           = true
   enable_aws_load_balancer_controller = true
 
-  # RDS Configuration
+  # RDS Configuration - Full production setup
   rds_engine                       = "postgres"
   rds_engine_version               = "15.4"
   rds_instance_class               = "db.r5.large"
@@ -88,7 +88,7 @@ module "payment_platform" {
   rds_monitoring_interval          = 60
   rds_performance_insights_enabled = true
 
-  # ElastiCache Configuration
+  # ElastiCache Configuration - Full production setup
   redis_node_type                  = "cache.r6g.large"
   redis_num_cache_clusters         = 3
   redis_parameter_group_family     = "redis7"
@@ -98,12 +98,87 @@ module "payment_platform" {
   redis_automatic_failover_enabled = true
   redis_multi_az_enabled           = true
 
-  # ALB Configuration
-  domain_name            = "api.your-domain.com"
-  certificate_arn        = "arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012"
-  alb_ssl_policy         = "ELBSecurityPolicy-TLS-1-2-2017-01"
-  alb_enable_access_logs = true
+  # ALB Configuration - Production with SSL
+  ssl_certificate_arn     = "arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012" # Update with your certificate ARN
+  ssl_policy              = "ELBSecurityPolicy-TLS-1-2-2017-01"
+  alb_access_logs_enabled = true
+  alb_access_logs_bucket  = "your-alb-access-logs-bucket" # Update with your S3 bucket
 
-  # Monitoring Configuration
-  cloudwatch_log_retention_days = 14
+  # Monitoring Configuration - Full production stack
+  grafana_enabled = true
+  loki_enabled    = true
+
+  # Prometheus configuration for production
+  prometheus_storage_size   = "100Gi"
+  prometheus_retention      = "90d"   # 3 months retention
+  prometheus_retention_size = "80GB"
+  prometheus_cpu_request    = "500m"
+  prometheus_memory_request = "4Gi"
+  prometheus_cpu_limit      = "2000m"
+  prometheus_memory_limit   = "8Gi"
+
+  # Grafana configuration for production
+  grafana_admin_password      = "production-secure-password-change-immediately"
+  grafana_persistence_enabled = true
+  grafana_storage_size        = "20Gi"
+  grafana_cpu_request         = "200m"
+  grafana_memory_request      = "256Mi"
+  grafana_cpu_limit           = "1000m"
+  grafana_memory_limit        = "1Gi"
+
+  # AlertManager configuration for production
+  smtp_smarthost     = "smtp.your-domain.com:587"          # Update with your SMTP server
+  smtp_from          = "alerts-production@your-domain.com" # Update with your email
+  slack_webhook_url  = "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK" # Update with your Slack webhook
+  slack_channel      = "#production-alerts"
+}
+
+# Output the monitoring deployment information
+output "monitoring_deployment_info" {
+  description = "Information about monitoring deployment"
+  value = {
+    cluster_name       = module.payment_platform.deployment_info.cluster_name
+    aws_region        = module.payment_platform.deployment_info.aws_region
+    environment       = module.payment_platform.deployment_info.environment
+    deployment_script = "Run './deploy-monitoring.sh' after terraform apply completes"
+    grafana_enabled   = true
+    loki_enabled      = true
+    full_stack       = "Complete production monitoring stack with high availability"
+  }
+}
+
+output "next_steps" {
+  description = "Next steps after terraform apply"
+  value = [
+    "1. Run: aws eks update-kubeconfig --region us-east-1 --name production-payment-platform-cluster",
+    "2. Run: ./deploy-monitoring.sh",
+    "3. Set up external access to Grafana (LoadBalancer or Ingress)",
+    "4. Configure monitoring dashboards and alerts",
+    "5. Set up log retention policies",
+    "6. Configure backup strategies for monitoring data",
+    "7. Test all alerting channels (Slack, email, etc.)"
+  ]
+}
+
+output "production_monitoring_urls" {
+  description = "Production monitoring access URLs (via port-forward)"
+  value = {
+    grafana_local     = "kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3000:80"
+    prometheus_local  = "kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090"
+    alertmanager_local = "kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093"
+    loki_local        = "kubectl port-forward -n monitoring svc/loki 3100:3100"
+  }
+}
+
+output "production_security_notes" {
+  description = "Important security considerations for production"
+  value = [
+    "1. Change the Grafana admin password immediately after deployment",
+    "2. Set up proper RBAC for monitoring namespace access", 
+    "3. Configure network policies to restrict monitoring access",
+    "4. Set up proper SSL certificates for external access",
+    "5. Enable audit logging for all monitoring components",
+    "6. Regularly rotate authentication tokens and passwords",
+    "7. Configure proper backup and disaster recovery procedures"
+  ]
 }

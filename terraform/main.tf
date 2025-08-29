@@ -244,27 +244,16 @@ module "alb" {
   depends_on = [module.vpc]
 }
 
-# Force EKS cluster to be ready before monitoring
-resource "null_resource" "wait_for_cluster" {
-  provisioner "local-exec" {
-    command = "aws eks wait cluster-active --name ${module.eks.cluster_name} --region ${var.aws_region}"
-  }
-
-  depends_on = [module.eks]
-}
-
-# Monitoring Module
+# Monitoring Module - Script-based deployment (no Kubernetes resources in Terraform)
 module "monitoring" {
   source = "./modules/monitoring"
 
-  eks_cluster_endpoint = module.eks.cluster_endpoint
-  eks_cluster_ca       = module.eks.cluster_certificate_authority_data
-  eks_cluster_token    = data.aws_eks_cluster_auth.main.token
-  namespace  = "monitoring"
-  aws_region = var.aws_region
+  cluster_name = module.eks.cluster_name
+  namespace    = "monitoring"
+  aws_region   = var.aws_region
 
   # Storage configuration
-  storage_class_name = "gp3"
+  storage_class_name = "gp2"
 
   # Prometheus settings
   prometheus_storage_size   = var.prometheus_storage_size
@@ -286,12 +275,7 @@ module "monitoring" {
   grafana_memory_limit        = var.grafana_memory_limit
 
   # Loki settings
-  loki_enabled          = var.loki_enabled
-  loki_storage_type     = var.loki_storage_type
-  loki_s3_bucket        = var.loki_s3_bucket
-  loki_read_replicas    = var.loki_read_replicas
-  loki_write_replicas   = var.loki_write_replicas
-  loki_backend_replicas = var.loki_backend_replicas
+  loki_enabled = var.loki_enabled
 
   # AlertManager configuration
   alertmanager_config = {
@@ -309,7 +293,7 @@ module "monitoring" {
     receivers = [
       {
         name = "default"
-        slack_configs = [
+        slack_configs = var.slack_webhook_url != "" ? [
           {
             api_url       = var.slack_webhook_url
             channel       = var.slack_channel
@@ -319,77 +303,13 @@ module "monitoring" {
             text          = "{{ range .Alerts }}{{ .Annotations.description }}{{ end }}"
             send_resolved = true
           }
-        ]
+        ] : []
+        webhook_configs = var.slack_webhook_url == "" ? [
+          {
+            url = "http://127.0.0.1:5001/"
+          }
+        ] : []
       }
     ]
   }
-
-  # Service monitors for custom applications
-  service_monitors = {
-    api-gateway = {
-      selector = {
-        app = "api-gateway"
-      }
-      endpoints = [
-        {
-          port     = "metrics"
-          interval = "30s"
-          path     = "/metrics"
-        }
-      ]
-      namespaces = ["default"]
-    }
-
-    postgres-exporter = {
-      selector = {
-        app = "postgres-exporter"
-      }
-      endpoints = [
-        {
-          port     = "metrics"
-          interval = "30s"
-          path     = "/metrics"
-        }
-      ]
-      namespaces = ["default"]
-    }
-  }
-
-  # Custom Prometheus rules
-  prometheus_rules = {
-    application-rules = {
-      groups = [
-        {
-          name = "application.rules"
-          rules = [
-            {
-              alert = "HighErrorRate"
-              expr  = "rate(http_requests_total{status=~\"5..\"}[5m]) > 0.1"
-              for   = "5m"
-              labels = {
-                severity = "warning"
-              }
-              annotations = {
-                summary     = "High error rate detected"
-                description = "Error rate is {{ $value }} per second for {{ $labels.instance }}"
-              }
-            },
-            {
-              alert = "HighLatency"
-              expr  = "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 0.5"
-              for   = "10m"
-              labels = {
-                severity = "warning"
-              }
-              annotations = {
-                summary     = "High latency detected"
-                description = "95th percentile latency is {{ $value }}s for {{ $labels.instance }}"
-              }
-            }
-          ]
-        }
-      ]
-    }
-  }
-
 }

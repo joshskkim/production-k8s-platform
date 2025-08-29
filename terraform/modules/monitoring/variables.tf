@@ -1,16 +1,8 @@
-variable "eks_cluster_endpoint" {
-  type        = string
-  description = "EKS cluster endpoint"
-}
+# terraform/modules/monitoring/variables.tf
 
-variable "eks_cluster_ca" {
+variable "cluster_name" {
+  description = "EKS cluster name"
   type        = string
-  description = "EKS cluster CA certificate (base64)"
-}
-
-variable "eks_cluster_token" {
-  type        = string
-  description = "EKS cluster authentication token"
 }
 
 variable "namespace" {
@@ -149,12 +141,6 @@ variable "grafana_memory_limit" {
   default     = "512Mi"
 }
 
-variable "grafana_dashboards" {
-  description = "Grafana dashboards configuration"
-  type        = map(any)
-  default     = {}
-}
-
 # AlertManager configuration
 variable "alertmanager_storage_size" {
   description = "Storage size for AlertManager"
@@ -195,76 +181,4 @@ variable "loki_enabled" {
   description = "Enable Loki deployment"
   type        = bool
   default     = true
-}
-
-variable "loki_storage_type" {
-  description = "Loki storage type (filesystem or s3)"
-  type        = string
-  default     = "filesystem"
-}
-
-variable "loki_s3_bucket" {
-  description = "S3 bucket for Loki storage"
-  type        = string
-  default     = ""
-}
-
-variable "loki_read_replicas" {
-  description = "Number of Loki read replicas"
-  type        = number
-  default     = 1
-}
-
-variable "loki_write_replicas" {
-  description = "Number of Loki write replicas"
-  type        = number
-  default     = 1
-}
-
-variable "loki_backend_replicas" {
-  description = "Number of Loki backend replicas"
-  type        = number
-  default     = 1
-}
-
-# Service Monitors
-variable "service_monitors" {
-  description = "Service monitors to create"
-  type = map(object({
-    selector = map(string)
-    endpoints = list(object({
-      port     = string
-      interval = optional(string, "30s")
-      path     = optional(string, "/metrics")
-    }))
-    namespaces = list(string)
-    labels     = optional(map(string), {})
-  }))
-  default = {}
-}
-
-# Prometheus Rules
-variable "prometheus_rules" {
-  description = "Prometheus rules to create"
-  type = map(object({
-    groups = list(object({
-      name     = string
-      interval = optional(string, "30s")
-      rules = list(object({
-        alert       = optional(string)
-        expr        = string
-        for         = optional(string, "2m")
-        labels      = optional(map(string), {})
-        annotations = optional(map(string), {})
-      }))
-    }))
-  }))
-  default = {}
-}
-
-# Additional scrape configurations
-variable "additional_scrape_configs" {
-  description = "Additional scrape configurations for Prometheus"
-  type        = list(any)
-  default     = []
 }

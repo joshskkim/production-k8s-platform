@@ -83,12 +83,58 @@ module "payment_platform" {
   alb_access_logs_enabled = false # disables ALB logging
   alb_access_logs_bucket  = ""    # no bucket since logs disabled
 
-  # Monitoring config
-  grafana_enabled = false # disables Grafana
-  loki_enabled    = false # disables Loki
+  # Monitoring config - Script-based deployment
+  grafana_enabled = false # disables Grafana for cost savings
+  loki_enabled    = false # disables Loki for cost savings
 
-  # (Prometheus is always on, but you can minimize resources if you don’t want it heavy)
-  prometheus_storage_size   = "1Gi"
-  prometheus_retention      = "1d"
-  prometheus_retention_size = "1GB"
+  # Prometheus is always on, but minimal resources for dev
+  prometheus_storage_size   = "5Gi"   # Reduced from 1Gi to 5Gi (minimum for dev)
+  prometheus_retention      = "3d"    # Reduced from 1d to 3d
+  prometheus_retention_size = "4GB"   # Reduced from 1GB to 4GB
+  
+  # Minimal Prometheus resources for development
+  prometheus_cpu_request    = "100m"  # Reduced CPU request
+  prometheus_memory_request = "1Gi"   # Reduced memory request
+  prometheus_cpu_limit      = "500m"  # Reduced CPU limit
+  prometheus_memory_limit   = "2Gi"   # Reduced memory limit
+
+  # Grafana disabled, but keeping variables for consistency
+  grafana_admin_password      = "dev-password"
+  grafana_persistence_enabled = false
+  grafana_storage_size        = "1Gi"
+  grafana_cpu_request         = "50m"
+  grafana_memory_request      = "64Mi"
+  grafana_cpu_limit           = "200m"
+  grafana_memory_limit        = "256Mi"
+
+  # AlertManager configuration for development
+  smtp_smarthost     = "localhost:587"
+  smtp_from          = "alerts-dev@example.org"
+  slack_webhook_url  = ""         # No Slack for dev
+  slack_channel      = "#dev-alerts"
+}
+
+# Output the monitoring deployment information
+output "monitoring_deployment_info" {
+  description = "Information about monitoring deployment"
+  value = {
+    cluster_name       = module.payment_platform.deployment_info.cluster_name
+    aws_region        = module.payment_platform.deployment_info.aws_region
+    environment       = module.payment_platform.deployment_info.environment
+    deployment_script = "Run './deploy-monitoring.sh' after terraform apply completes"
+    grafana_enabled   = false
+    loki_enabled      = false
+    prometheus_only   = "Minimal Prometheus deployment for development"
+  }
+}
+
+output "next_steps" {
+  description = "Next steps after terraform apply"
+  value = [
+    "1. Run: aws eks update-kubeconfig --region us-east-1 --name development-payment-platform-cluster",
+    "2. Run: ./deploy-monitoring.sh",
+    "3. Access Prometheus: kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090",
+    "4. View cluster: kubectl get nodes",
+    "5. View monitoring pods: kubectl get pods -n monitoring"
+  ]
 }

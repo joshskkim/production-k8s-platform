@@ -1,125 +1,191 @@
-# Create monitoring namespace
-resource "kubernetes_namespace" "monitoring" {
-  provider = kubernetes
-
-  metadata {
-    name = var.namespace
-    labels = {
-      name                                 = var.namespace
-      "pod-security.kubernetes.io/enforce" = "privileged"
-      "pod-security.kubernetes.io/audit"   = "privileged"
-      "pod-security.kubernetes.io/warn"    = "privileged"
+# Create a local file with the monitoring configuration
+resource "local_file" "monitoring_values" {
+  content = yamlencode({
+    namespace = var.namespace
+    prometheus = {
+      storageClass  = var.storage_class_name
+      storageSize   = var.prometheus_storage_size
+      retention     = var.prometheus_retention
+      retentionSize = var.prometheus_retention_size
+      resources = {
+        requests = {
+          cpu    = var.prometheus_cpu_request
+          memory = var.prometheus_memory_request
+        }
+        limits = {
+          cpu    = var.prometheus_cpu_limit
+          memory = var.prometheus_memory_limit
+        }
+      }
     }
-  }
-}
-
-# Prometheus Operator CRDs
-resource "helm_release" "prometheus_operator_crds" {
-  name       = "prometheus-operator-crds"
-  repository = "https://prometheus-community.github.io/helm-charts"
-  chart      = "prometheus-operator-crds"
-  version    = var.prometheus_operator_crds_version
-  namespace  = var.namespace
-
-  depends_on = [kubernetes_namespace.monitoring]
-}
-
-# kube-prometheus-stack
-resource "helm_release" "kube_prometheus_stack" {
-  name       = "kube-prometheus-stack"
-  repository = "https://prometheus-community.github.io/helm-charts"
-  chart      = "kube-prometheus-stack"
-  version    = var.kube_prometheus_stack_version
-  namespace  = var.namespace
-
-  # (all your set blocks here)
-  values = [yamlencode({
-    prometheus   = { prometheusSpec = { additionalScrapeConfigs = var.additional_scrape_configs } }
-    grafana      = {}
-    alertmanager = { config = var.alertmanager_config }
-  })]
-
-  depends_on = [
-    kubernetes_namespace.monitoring,
-    helm_release.prometheus_operator_crds
-  ]
-}
-
-# Loki
-resource "helm_release" "loki" {
-  provider = helm
-  count    = var.loki_enabled ? 1 : 0
-
-  name       = "loki"
-  repository = "https://grafana.github.io/helm-charts"
-  chart      = "loki"
-  version    = var.loki_version
-  namespace  = var.namespace
-
-  # (all your set blocks & values here)
-  depends_on = [kubernetes_namespace.monitoring]
-}
-
-# Promtail
-resource "helm_release" "promtail" {
-  provider = helm
-  count    = var.loki_enabled ? 1 : 0
-
-  name       = "promtail"
-  repository = "https://grafana.github.io/helm-charts"
-  chart      = "promtail"
-  version    = var.promtail_version
-  namespace  = var.namespace
-
-  set {
-    name  = "config.lokiAddress"
-    value = "http://loki:3100/loki/api/v1/push"
-  }
-
-  depends_on = [
-    kubernetes_namespace.monitoring,
-    helm_release.loki
-  ]
-}
-
-# Service Monitors
-resource "kubernetes_manifest" "service_monitors" {
-  provider = kubernetes
-  for_each = var.service_monitors
-
-  manifest = {
-    apiVersion = "monitoring.coreos.com/v1"
-    kind       = "ServiceMonitor"
-    metadata = {
-      name      = each.key
-      namespace = var.namespace
-      labels    = merge({ app = each.key }, each.value.labels)
+    grafana = {
+      enabled      = var.grafana_enabled
+      password     = var.grafana_admin_password
+      persistence  = var.grafana_persistence_enabled
+      storageSize  = var.grafana_storage_size
+      storageClass = var.storage_class_name
+      resources = {
+        requests = {
+          cpu    = var.grafana_cpu_request
+          memory = var.grafana_memory_request
+        }
+        limits = {
+          cpu    = var.grafana_cpu_limit
+          memory = var.grafana_memory_limit
+        }
+      }
     }
-    spec = {
-      selector          = { matchLabels = each.value.selector }
-      endpoints         = each.value.endpoints
-      namespaceSelector = { matchNames = each.value.namespaces }
+    loki = {
+      enabled = var.loki_enabled
     }
-  }
-
-  depends_on = [helm_release.kube_prometheus_stack]
+    alertmanager = {
+      config       = var.alertmanager_config
+      storageSize  = var.alertmanager_storage_size
+      storageClass = var.storage_class_name
+    }
+    versions = {
+      prometheus_operator_crds = var.prometheus_operator_crds_version
+      kube_prometheus_stack    = var.kube_prometheus_stack_version
+      loki                     = var.loki_version
+      promtail                 = var.promtail_version
+    }
+  })
+  filename = "${path.root}/monitoring-config.yaml"
 }
 
-# Prometheus Rules
-resource "kubernetes_manifest" "prometheus_rules" {
-  provider = kubernetes
-  for_each = var.prometheus_rules
+# Create the monitoring deployment script
+resource "local_file" "deploy_monitoring" {
+  content = templatefile("${path.module}/templates/deploy-monitoring.sh", {
+    cluster_name = var.cluster_name
+    aws_region   = var.aws_region
+    namespace    = var.namespace
+  })
+  filename        = "${path.root}/deploy-monitoring.sh"
+  file_permission = "0755"
+}
 
-  manifest = {
-    apiVersion = "monitoring.coreos.com/v1"
-    kind       = "PrometheusRule"
-    metadata = {
-      name      = each.key
-      namespace = var.namespace
-      labels    = { app = each.key, role = "alert-rules" }
+# Create the monitoring cleanup script
+resource "local_file" "cleanup_monitoring" {
+  content = templatefile("${path.module}/templates/cleanup-monitoring.sh", {
+    namespace = var.namespace
+  })
+  filename        = "${path.root}/cleanup-monitoring.sh"
+  file_permission = "0755"
+}
+
+# Create Helm values files
+resource "local_file" "prometheus_values" {
+  content = yamlencode({
+    prometheus = {
+      prometheusSpec = {
+        storageSpec = {
+          volumeClaimTemplate = {
+            spec = {
+              storageClassName = var.storage_class_name
+              resources = {
+                requests = {
+                  storage = var.prometheus_storage_size
+                }
+              }
+            }
+          }
+        }
+        retention     = var.prometheus_retention
+        retentionSize = var.prometheus_retention_size
+        resources = {
+          requests = {
+            cpu    = var.prometheus_cpu_request
+            memory = var.prometheus_memory_request
+          }
+          limits = {
+            cpu    = var.prometheus_cpu_limit
+            memory = var.prometheus_memory_limit
+          }
+        }
+        serviceMonitorSelectorNilUsesHelmValues = false
+        ruleSelectorNilUsesHelmValues           = false
+      }
     }
-    spec = { groups = each.value.groups }
-  }
+    grafana = {
+      enabled       = var.grafana_enabled
+      adminPassword = var.grafana_admin_password
+      persistence = {
+        enabled          = var.grafana_persistence_enabled
+        size             = var.grafana_storage_size
+        storageClassName = var.storage_class_name
+      }
+      resources = {
+        requests = {
+          cpu    = var.grafana_cpu_request
+          memory = var.grafana_memory_request
+        }
+        limits = {
+          cpu    = var.grafana_cpu_limit
+          memory = var.grafana_memory_limit
+        }
+      }
+    }
+    alertmanager = {
+      alertmanagerSpec = {
+        storage = {
+          volumeClaimTemplate = {
+            spec = {
+              storageClassName = var.storage_class_name
+              resources = {
+                requests = {
+                  storage = var.alertmanager_storage_size
+                }
+              }
+            }
+          }
+        }
+      }
+      config = var.alertmanager_config
+    }
+  })
+  filename = "${path.root}/prometheus-values.yaml"
+}
 
-  depends_on = [helm_release.kube_prometheus_stack]
+resource "local_file" "loki_values" {
+  count = var.loki_enabled ? 1 : 0
+
+  content = yamlencode({
+    loki = {
+      auth_enabled = false
+      commonConfig = {
+        replication_factor = 1
+      }
+      storage = {
+        type = "filesystem"
+      }
+    }
+    deploymentMode = "SingleBinary"
+    singleBinary = {
+      replicas = 1
+    }
+    test = {
+      enabled = false
+    }
+    monitoring = {
+      selfMonitoring = {
+        enabled = false
+      }
+      lokiCanary = {
+        enabled = false
+      }
+    }
+  })
+  filename = "${path.root}/loki-values.yaml"
+}
+
+resource "local_file" "promtail_values" {
+  count = var.loki_enabled ? 1 : 0
+
+  content = yamlencode({
+    config = {
+      lokiAddress = "http://loki:3100/loki/api/v1/push"
+      serverPort  = 3101
+    }
+  })
+  filename = "${path.root}/promtail-values.yaml"
 }
