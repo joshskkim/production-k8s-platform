@@ -106,23 +106,23 @@ module "payment_platform" {
   grafana_memory_limit        = "512Mi"
 
   # AlertManager configuration for staging
-  smtp_smarthost     = "localhost:587"
-  smtp_from          = "alerts-staging@your-domain.com"
-  slack_webhook_url  = ""  # Add your Slack webhook URL here
-  slack_channel      = "#staging-alerts"
+  smtp_smarthost    = "localhost:587"
+  smtp_from         = "alerts-staging@your-domain.com"
+  slack_webhook_url = "" # Add your Slack webhook URL here
+  slack_channel     = "#staging-alerts"
 }
 
 # Output the monitoring deployment information
 output "monitoring_deployment_info" {
   description = "Information about monitoring deployment"
   value = {
-    cluster_name       = module.payment_platform.deployment_info.cluster_name
+    cluster_name      = module.payment_platform.deployment_info.cluster_name
     aws_region        = module.payment_platform.deployment_info.aws_region
     environment       = module.payment_platform.deployment_info.environment
     deployment_script = "Run './deploy-monitoring.sh' after terraform apply completes"
     grafana_enabled   = true
     loki_enabled      = true
-    full_stack       = "Complete monitoring stack for staging environment"
+    full_stack        = "Complete monitoring stack for staging environment"
   }
 }
 
@@ -142,7 +142,7 @@ output "next_steps" {
 output "monitoring_credentials" {
   description = "Monitoring access credentials"
   value = {
-    grafana_username = "admin"
+    grafana_username         = "admin"
     grafana_password_command = "kubectl get secret -n monitoring kube-prometheus-stack-grafana -o jsonpath=\"{.data.admin-password}\" | base64 --decode"
   }
   sensitive = true

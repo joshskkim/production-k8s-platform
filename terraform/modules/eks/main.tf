@@ -138,6 +138,14 @@ resource "aws_launch_template" "node_group" {
     bootstrap_arguments = var.bootstrap_arguments
   }))
 
+  block_device_mappings {
+    device_name = "/dev/xvda"
+    ebs {
+      volume_size = each.value.disk_size # <-- add this
+      volume_type = "gp3"
+    }
+  }
+
   tag_specifications {
     resource_type = "instance"
     tags = merge(var.tags, {

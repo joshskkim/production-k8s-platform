@@ -110,7 +110,7 @@ module "payment_platform" {
 
   # Prometheus configuration for production
   prometheus_storage_size   = "100Gi"
-  prometheus_retention      = "90d"   # 3 months retention
+  prometheus_retention      = "90d" # 3 months retention
   prometheus_retention_size = "80GB"
   prometheus_cpu_request    = "500m"
   prometheus_memory_request = "4Gi"
@@ -127,23 +127,23 @@ module "payment_platform" {
   grafana_memory_limit        = "1Gi"
 
   # AlertManager configuration for production
-  smtp_smarthost     = "smtp.your-domain.com:587"          # Update with your SMTP server
-  smtp_from          = "alerts-production@your-domain.com" # Update with your email
-  slack_webhook_url  = "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK" # Update with your Slack webhook
-  slack_channel      = "#production-alerts"
+  smtp_smarthost    = "smtp.your-domain.com:587"                            # Update with your SMTP server
+  smtp_from         = "alerts-production@your-domain.com"                   # Update with your email
+  slack_webhook_url = "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK" # Update with your Slack webhook
+  slack_channel     = "#production-alerts"
 }
 
 # Output the monitoring deployment information
 output "monitoring_deployment_info" {
   description = "Information about monitoring deployment"
   value = {
-    cluster_name       = module.payment_platform.deployment_info.cluster_name
+    cluster_name      = module.payment_platform.deployment_info.cluster_name
     aws_region        = module.payment_platform.deployment_info.aws_region
     environment       = module.payment_platform.deployment_info.environment
     deployment_script = "Run './deploy-monitoring.sh' after terraform apply completes"
     grafana_enabled   = true
     loki_enabled      = true
-    full_stack       = "Complete production monitoring stack with high availability"
+    full_stack        = "Complete production monitoring stack with high availability"
   }
 }
 
@@ -163,10 +163,10 @@ output "next_steps" {
 output "production_monitoring_urls" {
   description = "Production monitoring access URLs (via port-forward)"
   value = {
-    grafana_local     = "kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3000:80"
-    prometheus_local  = "kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090"
+    grafana_local      = "kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3000:80"
+    prometheus_local   = "kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090"
     alertmanager_local = "kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093"
-    loki_local        = "kubectl port-forward -n monitoring svc/loki 3100:3100"
+    loki_local         = "kubectl port-forward -n monitoring svc/loki 3100:3100"
   }
 }
 
@@ -174,7 +174,7 @@ output "production_security_notes" {
   description = "Important security considerations for production"
   value = [
     "1. Change the Grafana admin password immediately after deployment",
-    "2. Set up proper RBAC for monitoring namespace access", 
+    "2. Set up proper RBAC for monitoring namespace access",
     "3. Configure network policies to restrict monitoring access",
     "4. Set up proper SSL certificates for external access",
     "5. Enable audit logging for all monitoring components",

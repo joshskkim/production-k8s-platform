@@ -88,15 +88,15 @@ module "payment_platform" {
   loki_enabled    = false # disables Loki for cost savings
 
   # Prometheus is always on, but minimal resources for dev
-  prometheus_storage_size   = "5Gi"   # Reduced from 1Gi to 5Gi (minimum for dev)
-  prometheus_retention      = "3d"    # Reduced from 1d to 3d
-  prometheus_retention_size = "4GB"   # Reduced from 1GB to 4GB
-  
+  prometheus_storage_size   = "5Gi" # Reduced from 1Gi to 5Gi (minimum for dev)
+  prometheus_retention      = "3d"  # Reduced from 1d to 3d
+  prometheus_retention_size = "4GB" # Reduced from 1GB to 4GB
+
   # Minimal Prometheus resources for development
-  prometheus_cpu_request    = "100m"  # Reduced CPU request
-  prometheus_memory_request = "1Gi"   # Reduced memory request
-  prometheus_cpu_limit      = "500m"  # Reduced CPU limit
-  prometheus_memory_limit   = "2Gi"   # Reduced memory limit
+  prometheus_cpu_request    = "100m" # Reduced CPU request
+  prometheus_memory_request = "1Gi"  # Reduced memory request
+  prometheus_cpu_limit      = "500m" # Reduced CPU limit
+  prometheus_memory_limit   = "2Gi"  # Reduced memory limit
 
   # Grafana disabled, but keeping variables for consistency
   grafana_admin_password      = "dev-password"
@@ -108,17 +108,17 @@ module "payment_platform" {
   grafana_memory_limit        = "256Mi"
 
   # AlertManager configuration for development
-  smtp_smarthost     = "localhost:587"
-  smtp_from          = "alerts-dev@example.org"
-  slack_webhook_url  = ""         # No Slack for dev
-  slack_channel      = "#dev-alerts"
+  smtp_smarthost    = "localhost:587"
+  smtp_from         = "alerts-dev@example.org"
+  slack_webhook_url = "" # No Slack for dev
+  slack_channel     = "#dev-alerts"
 }
 
 # Output the monitoring deployment information
 output "monitoring_deployment_info" {
   description = "Information about monitoring deployment"
   value = {
-    cluster_name       = module.payment_platform.deployment_info.cluster_name
+    cluster_name      = module.payment_platform.deployment_info.cluster_name
     aws_region        = module.payment_platform.deployment_info.aws_region
     environment       = module.payment_platform.deployment_info.environment
     deployment_script = "Run './deploy-monitoring.sh' after terraform apply completes"
