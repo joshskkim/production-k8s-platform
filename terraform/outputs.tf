@@ -51,7 +51,7 @@ output "cache" {
   } : null
 }
 
-output "load balancer" {
+output "load_balancer" {
   description = "Load balancer information"
   value = var.create_alb ? {
     dns_name = module.alb[0].alb_dns_name
